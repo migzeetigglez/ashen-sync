@@ -34,7 +34,7 @@ Threat note: whoever can use your rclone remote can read/write the dedicated fol
 ### Build (on a gaming PC / Deck)
 
 ```bash
-git clone https://github.com/michaelteague/ashen-sync.git
+git clone https://github.com/migzeetigglez/ashen-sync.git
 cd ashen-sync
 go build -o ashen-sync ./cmd/ashen-sync
 ```

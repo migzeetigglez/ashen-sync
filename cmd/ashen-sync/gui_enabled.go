@@ -2,7 +2,7 @@
 
 package main
 
-import "github.com/michaelteague/ashen-sync/internal/gui"
+import "github.com/migzeetigglez/ashen-sync/internal/gui"
 
 func runGUI() error {
 	return gui.Run()

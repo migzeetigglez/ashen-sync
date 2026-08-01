@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/michaelteague/ashen-sync/internal/detect"
-	"github.com/michaelteague/ashen-sync/internal/processx"
-	"github.com/michaelteague/ashen-sync/internal/syncer"
+	"github.com/migzeetigglez/ashen-sync/internal/detect"
+	"github.com/migzeetigglez/ashen-sync/internal/processx"
+	"github.com/migzeetigglez/ashen-sync/internal/syncer"
 )
 
 type Event struct {

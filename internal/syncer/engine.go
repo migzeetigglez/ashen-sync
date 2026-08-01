@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/michaelteague/ashen-sync/internal/config"
-	"github.com/michaelteague/ashen-sync/internal/detect"
-	"github.com/michaelteague/ashen-sync/internal/manifest"
-	"github.com/michaelteague/ashen-sync/internal/rclonex"
-	"github.com/michaelteague/ashen-sync/internal/snapshot"
+	"github.com/migzeetigglez/ashen-sync/internal/config"
+	"github.com/migzeetigglez/ashen-sync/internal/detect"
+	"github.com/migzeetigglez/ashen-sync/internal/manifest"
+	"github.com/migzeetigglez/ashen-sync/internal/rclonex"
+	"github.com/migzeetigglez/ashen-sync/internal/snapshot"
 )
 
 const ToolVersion = "0.1.0"

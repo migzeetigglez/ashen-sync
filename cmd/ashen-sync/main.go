@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/michaelteague/ashen-sync/internal/config"
-	"github.com/michaelteague/ashen-sync/internal/detect"
-	"github.com/michaelteague/ashen-sync/internal/rclonex"
-	"github.com/michaelteague/ashen-sync/internal/syncer"
-	"github.com/michaelteague/ashen-sync/internal/watch"
+	"github.com/migzeetigglez/ashen-sync/internal/config"
+	"github.com/migzeetigglez/ashen-sync/internal/detect"
+	"github.com/migzeetigglez/ashen-sync/internal/rclonex"
+	"github.com/migzeetigglez/ashen-sync/internal/syncer"
+	"github.com/migzeetigglez/ashen-sync/internal/watch"
 )
 
 func main() {

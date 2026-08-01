@@ -8,8 +8,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/michaelteague/ashen-sync/internal/detect"
-	"github.com/michaelteague/ashen-sync/internal/processx"
+	"github.com/migzeetigglez/ashen-sync/internal/detect"
+	"github.com/migzeetigglez/ashen-sync/internal/processx"
 )
 
 // Play pulls (if possible), launches the Steam game, waits for exit, then pushes.

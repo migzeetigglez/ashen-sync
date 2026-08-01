@@ -1,4 +1,4 @@
-module github.com/michaelteague/ashen-sync
+module github.com/migzeetigglez/ashen-sync
 
 go 1.22
 

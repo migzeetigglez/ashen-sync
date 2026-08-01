@@ -17,10 +17,10 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/michaelteague/ashen-sync/internal/config"
-	"github.com/michaelteague/ashen-sync/internal/detect"
-	"github.com/michaelteague/ashen-sync/internal/syncer"
-	"github.com/michaelteague/ashen-sync/internal/watch"
+	"github.com/migzeetigglez/ashen-sync/internal/config"
+	"github.com/migzeetigglez/ashen-sync/internal/detect"
+	"github.com/migzeetigglez/ashen-sync/internal/syncer"
+	"github.com/migzeetigglez/ashen-sync/internal/watch"
 )
 
 func Run() error {
