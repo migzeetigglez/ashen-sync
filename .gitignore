@@ -1,0 +1,7 @@
+/bin/
+/dist/
+*.exe
+*.test
+.DS_Store
+/ashen-sync
+/ashen-sync-*
