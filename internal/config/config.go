@@ -15,14 +15,15 @@ const AppName = "save-channeler"
 const legacyAppName = "ashen-sync"
 
 type Config struct {
-	RclonePath         string            `toml:"rclone_path"`
-	Remote             string            `toml:"remote"`              // e.g. "gdrive"
-	RemotePath         string            `toml:"remote_path"`         // e.g. "save-channeler"
-	SnapshotKeep       int               `toml:"snapshot_keep"`       // default 10
-	QuietPeriodSeconds int               `toml:"quiet_period_seconds"` // watcher debounce
-	PullIntervalSeconds int              `toml:"pull_interval_seconds"` // idle remote check
-	GameOverrides      map[string]string `toml:"game_overrides"`      // game id -> save dir
-	SteamExecutable    string            `toml:"steam_executable"`
+	RclonePath          string            `toml:"rclone_path"`
+	Remote              string            `toml:"remote"`               // e.g. "gdrive"
+	RemotePath          string            `toml:"remote_path"`          // e.g. "save-channeler"
+	SnapshotKeep        int               `toml:"snapshot_keep"`        // default 10
+	QuietPeriodSeconds  int               `toml:"quiet_period_seconds"`  // watcher debounce
+	PullIntervalSeconds int               `toml:"pull_interval_seconds"` // idle remote check
+	UIScale             float32           `toml:"ui_scale"`             // GUI scale (1.0 = normal; 1.5 recommended on 4K)
+	GameOverrides       map[string]string `toml:"game_overrides"`       // game id -> save dir
+	SteamExecutable     string            `toml:"steam_executable"`
 }
 
 func Default() Config {
@@ -32,8 +33,23 @@ func Default() Config {
 		SnapshotKeep:        10,
 		QuietPeriodSeconds:  15,
 		PullIntervalSeconds: 300,
+		UIScale:             1.5,
 		GameOverrides:       map[string]string{},
 	}
+}
+
+// UIScaleOrDefault returns a usable GUI scale (clamped).
+func (c Config) UIScaleOrDefault() float32 {
+	if c.UIScale <= 0 {
+		return 1.5
+	}
+	if c.UIScale < 0.5 {
+		return 0.5
+	}
+	if c.UIScale > 3 {
+		return 3
+	}
+	return c.UIScale
 }
 
 func (c Config) QuietPeriod() time.Duration {
@@ -137,6 +153,9 @@ func Load() (Config, error) {
 	}
 	if cfg.RemotePath == "" {
 		cfg.RemotePath = "save-channeler"
+	}
+	if cfg.UIScale <= 0 {
+		cfg.UIScale = 1.5
 	}
 	if cfg.GameOverrides == nil {
 		cfg.GameOverrides = map[string]string{}

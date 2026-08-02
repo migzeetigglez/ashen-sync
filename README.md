@@ -115,6 +115,7 @@ remote_path = "save-channeler"
 snapshot_keep = 10
 quiet_period_seconds = 15
 pull_interval_seconds = 300
+ui_scale = 1.5                 # GUI scale (1.0–3.0); also changeable in the app
 ```
 
 Override a save path if auto-detect fails:

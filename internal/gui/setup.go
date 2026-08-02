@@ -94,6 +94,9 @@ func setupGoogleDrive(ctx context.Context, rcloneBin, folder string, log func(st
 	log("Google Drive linked as remote “gdrive”.")
 
 	cfg := config.Default()
+	if existing, err := config.Load(); err == nil {
+		cfg = existing
+	}
 	cfg.RclonePath = rcloneBin
 	cfg.Remote = defaultRemoteName
 	cfg.RemotePath = folder

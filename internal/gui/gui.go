@@ -31,12 +31,16 @@ func Run() error {
 		return err
 	}
 
+	applyStartupScale(cfg.UIScaleOrDefault())
+
 	a := app.NewWithID("com.savechanneler.app")
 	icon := appIcon()
 	a.SetIcon(icon)
 	w := a.NewWindow("Save Channeler")
 	w.SetIcon(icon)
-	w.Resize(fyne.NewSize(880, 560))
+	// Logical size; FYNE_SCALE / settings.json multiply physical pixels.
+	w.Resize(fyne.NewSize(960, 620))
+	w.SetFixedSize(false)
 
 	eng, err := syncer.New(cfg)
 	if err != nil {
@@ -304,7 +308,18 @@ func Run() error {
 
 	gameRow := container.NewBorder(nil, nil, widget.NewLabel("Game"), refreshBtn, gameSelect)
 	actions := container.NewVBox(pullBtn, pushBtn, playBtn, watchBtn)
-	rightTop := container.NewVBox(gameRow, widget.NewSeparator(), statusLabel, widget.NewSeparator(), actions)
+	scaleRow := newUIScaleControl(&cfg, w, func(updated config.Config) {
+		cfg = updated
+	})
+	rightTop := container.NewVBox(
+		gameRow,
+		widget.NewSeparator(),
+		statusLabel,
+		widget.NewSeparator(),
+		actions,
+		widget.NewSeparator(),
+		scaleRow,
+	)
 	right := container.NewBorder(rightTop, nil, nil, nil, container.NewPadded(container.NewVScroll(logEntry)))
 
 	split := container.NewHSplit(
