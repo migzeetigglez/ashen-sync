@@ -2,6 +2,7 @@
 # Build a Linux amd64 distribution (Steam Deck / desktop).
 # On Linux hosts: prefers a full GUI build; falls back to -tags nogui.
 # When cross-compiling (e.g. from macOS): builds CLI/watcher with -tags nogui.
+# Bundles a pinned rclone binary next to save-channeler (no PATH install needed).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -36,6 +37,9 @@ else
 fi
 chmod +x "$STAGE/bin/$BIN_NAME"
 
+# Bundle rclone beside the app binary
+"$ROOT/scripts/fetch-rclone.sh" linux "$STAGE/bin"
+
 # Desktop entry with PATH-friendly Exec
 sed 's|^Exec=.*|Exec=save-channeler gui|' assets/save-channeler.desktop \
   > "$STAGE/share/applications/save-channeler.desktop"
@@ -69,6 +73,9 @@ mkdir -p "$PREFIX/bin" \
   "$PREFIX/share/icons/hicolor/64x64/apps"
 
 install -m 755 "$HERE/bin/save-channeler" "$PREFIX/bin/save-channeler"
+if [[ -f "$HERE/bin/rclone" ]]; then
+  install -m 755 "$HERE/bin/rclone" "$PREFIX/bin/rclone"
+fi
 install -m 644 "$HERE/share/applications/save-channeler.desktop" \
   "$PREFIX/share/applications/save-channeler.desktop"
 
@@ -90,9 +97,9 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
   gtk-update-icon-cache -f -t "$PREFIX/share/icons/hicolor" 2>/dev/null || true
 fi
 
-echo "Installed save-channeler to $PREFIX/bin"
-echo "Ensure $PREFIX/bin is on your PATH, then run: save-channeler doctor"
-echo "Also install rclone: https://rclone.org/install/"
+echo "Installed save-channeler (and bundled rclone) to $PREFIX/bin"
+echo "Open Save Channeler from your app menu, or run: save-channeler gui"
+echo "First launch: Set remote (Google Drive), then Auto-detect local saves."
 INSTALL
 chmod +x "$STAGE/install.sh"
 
@@ -103,14 +110,15 @@ Save Channeler for Linux / Steam Deck
 Quick install (Desktop Mode on Deck is fine):
   ./install.sh
 
-Or copy bin/save-channeler somewhere on your PATH.
+Or run from this folder:
+  ./bin/save-channeler gui
 
-Requires rclone on PATH: https://rclone.org/install/
+rclone is bundled in bin/rclone — no separate install or PATH setup needed.
 
-Then:
-  save-channeler doctor
-  save-channeler gui          # if this build includes the GUI
-  save-channeler play ds3
+Then in the app:
+  1. Remote → Set (link Google Drive)
+  2. Auto-detect save folder (or Browse if needed)
+  3. Pull / Push / Play
 
 Build type: $([[ "$build_gui" == 1 ]] && echo "GUI+CLI" || echo "CLI/watcher (-tags nogui)")
 EOF

@@ -187,8 +187,10 @@ func cmdDoctor() error {
 
 	rc := rclonex.Client{Bin: cfg.RclonePath}
 	ctx := context.Background()
+	fmt.Println("rclone binary:", rc.ResolvedPath())
 	if ver, err := rc.Version(ctx); err != nil {
 		fmt.Println("rclone: NOT FOUND —", err)
+		fmt.Println("hint: packaged builds ship rclone next to save-channeler; or set rclone_path in config")
 	} else {
 		fmt.Println("rclone:", ver)
 		if cfg.Remote != "" {

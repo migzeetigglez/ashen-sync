@@ -1,0 +1,85 @@
+name: Release packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  RCLONE_VERSION: "1.75.0"
+
+jobs:
+  linux:
+    name: Linux amd64 (GUI + rclone)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Install GUI build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev xorg-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev unzip curl
+
+      - name: Package
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/package-linux.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: save-channeler-linux-amd64
+          path: dist/save-channeler-linux-amd64.tar.gz
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/save-channeler-linux-amd64.tar.gz
+
+  windows:
+    name: Windows amd64 (GUI + rclone)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Install MinGW for Fyne/CGO
+        run: choco install mingw -y --no-progress
+
+      - name: Install zip tools
+        shell: bash
+        run: |
+          choco install unzip curl -y --no-progress || true
+
+      - name: Package (native GUI)
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          chmod +x scripts/*.sh
+          export PATH="/c/ProgramData/mingw64/mingw64/bin:/c/ProgramData/chocolatey/bin:$PATH"
+          ./scripts/package-windows.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: save-channeler-windows-amd64
+          path: dist/save-channeler-windows-amd64.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/save-channeler-windows-amd64.zip

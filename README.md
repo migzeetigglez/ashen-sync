@@ -10,7 +10,7 @@ FromSoftware never shipped Steam Cloud for these titles. Save Channeler fills th
 
 ## Security model
 
-- **Your cloud, your credentials.** Sync uses a rclone remote *you* configure (`rclone config`). Save Channeler only shells out to `rclone`.
+- **Your cloud, your credentials.** Sync uses a rclone remote *you* configure. Packaged builds ship rclone next to the app; Save Channeler only shells out to that binary (or a path you set).
 - **No embedded OAuth client secrets** in this repo or binary.
 - **No central sync server.** We never receive your save files.
 - **No silent overwrites.** Divergent local/remote saves produce a conflict; you choose local or remote. Local snapshots are kept before replace.
@@ -27,35 +27,49 @@ Threat note: whoever can use your rclone remote can read/write the dedicated fol
 
 App icon (Channeler helm + beige fedora) lives in [`assets/icon.png`](assets/icon.png) and is embedded in GUI builds.
 
-## Install
+## Install (packaged — recommended)
 
-### Requirements
+Release zips/tarballs **include rclone**. You do **not** need to install rclone or put it on your PATH.
 
-- [rclone](https://rclone.org/install/) on your `PATH` (or set `rclone_path` in config)
-- Steam + DS2 SotFS and/or DS3
-- Go 1.22+ to build from source
+### Windows
 
-### Package for Linux / Steam Deck / Windows
+1. Download `save-channeler-windows-amd64.zip` from [Releases](https://github.com/migzeetigglez/ashen-sync/releases).
+2. Extract somewhere permanent (e.g. `%USERPROFILE%\Games\SaveChanneler`).
+3. Double-click `save-channeler.exe`.
+4. In the app: **Remote → Set** (link Google Drive), then accept **Auto-detect** (or Browse).
 
-From this repo (works when cross-compiling from a Mac too):
+`rclone.exe` sits next to `save-channeler.exe` in the same folder.
 
-```bash
-./scripts/package-linux.sh      # → dist/save-channeler-linux-amd64.tar.gz
-./scripts/package-windows.sh    # → dist/save-channeler-windows-amd64.zip
-./scripts/package-macos.sh      # → dist/Save Channeler.app (dev machine)
-```
-
-**Linux / Deck:** copy the tarball over, then:
+### Linux / Steam Deck
 
 ```bash
 tar xzf save-channeler-linux-amd64.tar.gz
 cd save-channeler-linux-amd64
-./install.sh                    # installs to ~/.local/bin + .desktop launcher
+./install.sh          # installs app + bundled rclone to ~/.local/bin + .desktop launcher
 ```
 
-**Windows:** extract the zip, install [rclone](https://rclone.org/install/), run `save-channeler.exe doctor`. Use `play-ds3.bat` after setup. Cross-built zips are CLI-only; build on Windows (without `-tags nogui`) for the GUI.
+Open **Save Channeler** from the app menu (or `save-channeler gui`), then **Remote → Set** and Auto-detect.
 
-### Build manually
+### What you still do once
+
+| Step | Why |
+|---|---|
+| Link remote (Google Drive) | Your cloud credentials — only you can authorize |
+| Confirm local save folder | Auto-detect usually finds it; Browse if it does not |
+
+## Build from source
+
+Requirements: Go 1.22+, Steam + DS2 SotFS and/or DS3. rclone is optional if you package with the scripts below (they download a pinned rclone).
+
+```bash
+./scripts/package-linux.sh      # → dist/save-channeler-linux-amd64.tar.gz (+ rclone)
+./scripts/package-windows.sh    # → dist/save-channeler-windows-amd64.zip (+ rclone.exe)
+./scripts/package-macos.sh      # → dist/Save Channeler.app (dev machine)
+```
+
+Pin rclone with `RCLONE_VERSION=1.75.0` (default in scripts / CI).
+
+Manual binary only:
 
 ```bash
 git clone https://github.com/migzeetigglez/ashen-sync.git
@@ -63,13 +77,7 @@ cd ashen-sync
 go build -o save-channeler ./cmd/save-channeler   # GUI needs CGO + OpenGL on that OS
 ```
 
-### One-time setup
-
-```bash
-rclone config                 # create a remote; prefer a dedicated folder
-./save-channeler init         # pick remote name + path (default: save-channeler)
-./save-channeler doctor
-```
+If you build without packaging, either place `rclone` next to the binary or install rclone and/or set `rclone_path` in config.
 
 ## Usage
 
@@ -81,6 +89,7 @@ rclone config                 # create a remote; prefer a dedicated folder
 ./save-channeler play ds3
 ./save-channeler watch
 ./save-channeler gui
+./save-channeler doctor
 ```
 
 Conflict resolution:
@@ -94,11 +103,11 @@ Games: `ds2` (Scholar of the First Sin), `ds3`, `ds2-vanilla`.
 
 ### Steam Deck
 
-1. Desktop Mode: install rclone (static binary in `$HOME/bin` is fine).
-2. `rclone config` + `save-channeler init`.
-3. For Game Mode, add a non-Steam shortcut or game launch option that runs:
-   `/path/to/save-channeler play ds3`
-4. Optional: run `save-channeler watch` from Desktop Mode / autostart when you want idle sync without the launch wrapper.
+1. Desktop Mode: install the Linux package (`./install.sh`).
+2. Open the GUI once: Remote → Set, Auto-detect.
+3. For Game Mode, add a non-Steam shortcut or launch option:
+   `/home/deck/.local/bin/save-channeler play ds3`
+4. Optional: run `save-channeler watch` from Desktop Mode / autostart for idle sync.
 
 ### Config
 
@@ -109,7 +118,7 @@ Games: `ds2` (Scholar of the First Sin), `ds3`, `ds2-vanilla`.
 Legacy `~/.config/ashen-sync/` configs are still read if the new path is missing.
 
 ```toml
-rclone_path = "rclone"
+rclone_path = "rclone"         # optional override; packaged builds resolve bundled rclone automatically
 remote = "gdrive"
 remote_path = "save-channeler"
 snapshot_keep = 10
@@ -130,7 +139,7 @@ ds3 = "/full/path/to/DarkSoulsIII/7656119..."
 | Platform | DS2 SotFS / DS3 |
 |---|---|
 | Windows | `%APPDATA%\DarkSoulsII\<steamid>\` / `%APPDATA%\DarkSoulsIII\<steamid>\` |
-| Linux / Deck (Proton) | `~/.steam/steam/steamapps/compatdata/<appid>/pfx/drive_c/users/steamuser/AppData/Roaming/...` |
+| Linux / Deck (Proton) | Steam library `compatdata/<appid>/pfx/drive_c/users/steamuser/AppData/Roaming/...` |
 
 AppIDs: SotFS `335300`, DS3 `374320`, vanilla DS2 `236430`.
 

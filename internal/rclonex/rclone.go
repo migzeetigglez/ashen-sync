@@ -6,20 +6,120 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 )
 
-// Client shells out to a user-installed rclone binary.
+// Client shells out to rclone (bundled next to Save Channeler, or system-installed).
 // Save Channeler never embeds cloud OAuth secrets.
 type Client struct {
 	Bin string
 }
 
+var (
+	resolvedBin     string
+	resolvedBinOnce sync.Once
+)
+
 func (c Client) bin() string {
-	if c.Bin == "" {
+	name := c.Bin
+	if name == "" {
+		name = "rclone"
+	}
+	// Absolute / relative path in config: use as-is when it exists.
+	if filepath.IsAbs(name) || strings.Contains(name, string(os.PathSeparator)) {
+		if st, err := os.Stat(name); err == nil && !st.IsDir() {
+			return name
+		}
+		// Fall through to resolution if configured path is missing.
+	}
+	resolvedBinOnce.Do(func() {
+		resolvedBin = resolveRclone(rcloneBaseName(name))
+	})
+	if resolvedBin != "" {
+		return resolvedBin
+	}
+	return name
+}
+
+// ResolvedPath returns the rclone binary path that will be executed.
+func (c Client) ResolvedPath() string {
+	return c.bin()
+}
+
+func rcloneBaseName(name string) string {
+	base := filepath.Base(name)
+	if base == "" || base == "." || base == string(os.PathSeparator) {
 		return "rclone"
 	}
-	return c.Bin
+	return base
+}
+
+func resolveRclone(name string) string {
+	exeName := name
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(exeName), ".exe") {
+		exeName = exeName + ".exe"
+	}
+
+	// 1) Bundled next to Save Channeler (preferred — no PATH required).
+	if exeDir := executableDir(); exeDir != "" {
+		for _, p := range []string{
+			filepath.Join(exeDir, exeName),
+			filepath.Join(exeDir, name),
+			filepath.Join(exeDir, "bin", exeName),
+			filepath.Join(exeDir, "bin", name),
+		} {
+			if isExecFile(p) {
+				return p
+			}
+		}
+	}
+
+	// 2) PATH
+	for _, cand := range []string{exeName, name} {
+		if p, err := exec.LookPath(cand); err == nil {
+			return p
+		}
+	}
+
+	// 3) Common user / system locations
+	var candidates []string
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(home, ".local", "bin", exeName),
+			filepath.Join(home, ".local", "bin", name),
+			filepath.Join(home, "bin", exeName),
+			filepath.Join(home, "bin", name),
+		)
+	}
+	candidates = append(candidates,
+		filepath.Join("/usr/local/bin", name),
+		filepath.Join("/usr/bin", name),
+	)
+	for _, p := range candidates {
+		if isExecFile(p) {
+			return p
+		}
+	}
+	return name
+}
+
+func executableDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return filepath.Dir(exe)
+}
+
+func isExecFile(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }
 
 func (c Client) run(ctx context.Context, args ...string) (string, error) {
