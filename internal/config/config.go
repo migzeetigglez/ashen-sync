@@ -11,12 +11,13 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const AppName = "ashen-sync"
+const AppName = "save-channeler"
+const legacyAppName = "ashen-sync"
 
 type Config struct {
 	RclonePath         string            `toml:"rclone_path"`
 	Remote             string            `toml:"remote"`              // e.g. "gdrive"
-	RemotePath         string            `toml:"remote_path"`         // e.g. "ashen-sync"
+	RemotePath         string            `toml:"remote_path"`         // e.g. "save-channeler"
 	SnapshotKeep       int               `toml:"snapshot_keep"`       // default 10
 	QuietPeriodSeconds int               `toml:"quiet_period_seconds"` // watcher debounce
 	PullIntervalSeconds int              `toml:"pull_interval_seconds"` // idle remote check
@@ -27,7 +28,7 @@ type Config struct {
 func Default() Config {
 	return Config{
 		RclonePath:          "rclone",
-		RemotePath:          "ashen-sync",
+		RemotePath:          "save-channeler",
 		SnapshotKeep:        10,
 		QuietPeriodSeconds:  15,
 		PullIntervalSeconds: 300,
@@ -105,9 +106,19 @@ func Load() (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return cfg, os.ErrNotExist
+			// Fall back to pre-rename config location.
+			if legacy, lerr := legacyPath(); lerr == nil {
+				if data, err = os.ReadFile(legacy); err == nil {
+					path = legacy
+				} else {
+					return cfg, os.ErrNotExist
+				}
+			} else {
+				return cfg, os.ErrNotExist
+			}
+		} else {
+			return cfg, err
 		}
-		return cfg, err
 	}
 	if _, err := toml.Decode(string(data), &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config: %w", err)
@@ -125,12 +136,31 @@ func Load() (Config, error) {
 		cfg.RclonePath = "rclone"
 	}
 	if cfg.RemotePath == "" {
-		cfg.RemotePath = "ashen-sync"
+		cfg.RemotePath = "save-channeler"
 	}
 	if cfg.GameOverrides == nil {
 		cfg.GameOverrides = map[string]string{}
 	}
+	_ = path
 	return cfg, nil
+}
+
+func legacyPath() (string, error) {
+	if runtime.GOOS == "windows" {
+		base := os.Getenv("APPDATA")
+		if base == "" {
+			return "", errors.New("APPDATA is not set")
+		}
+		return filepath.Join(base, legacyAppName, "config.toml"), nil
+	}
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, legacyAppName, "config.toml"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", legacyAppName, "config.toml"), nil
 }
 
 func (c Config) Save() error {
@@ -163,7 +193,15 @@ func (c Config) RemoteRoot() string {
 
 func (c Config) Validate() error {
 	if c.Remote == "" {
-		return errors.New("remote is not set; run `ashen-sync init`")
+		return errors.New("remote is not set; run `save-channeler init`")
 	}
 	return nil
+}
+
+// ClearRemote unsets the sync destination and saves config.
+// rclone remotes themselves are left alone so other tools keep working.
+func (c *Config) ClearRemote() error {
+	c.Remote = ""
+	c.RemotePath = "save-channeler"
+	return c.Save()
 }

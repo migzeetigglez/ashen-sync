@@ -10,7 +10,7 @@ import (
 )
 
 // Client shells out to a user-installed rclone binary.
-// Ashen Sync never embeds cloud OAuth secrets.
+// Save Channeler never embeds cloud OAuth secrets.
 type Client struct {
 	Bin string
 }

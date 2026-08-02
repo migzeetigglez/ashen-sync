@@ -20,8 +20,13 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+		// Double-click / .app launch has no args — open the GUI when built with it.
+		if err := runGUI(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
+			usage()
+			os.Exit(1)
+		}
+		return
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
@@ -31,7 +36,7 @@ func main() {
 	case "help", "-h", "--help":
 		usage()
 	case "version", "-v", "--version":
-		fmt.Println("ashen-sync", syncer.ToolVersion)
+		fmt.Println("save-channeler", syncer.ToolVersion)
 	case "init":
 		err = cmdInit()
 	case "doctor":
@@ -62,24 +67,24 @@ func main() {
 }
 
 func usage() {
-	fmt.Print(`ashen-sync — open DS2/DS3 cloud saves via your rclone remote
+	fmt.Print(`Save Channeler — open DS2/DS3 cloud saves via your rclone remote
 
 Usage:
-  ashen-sync init
-  ashen-sync doctor
-  ashen-sync games
-  ashen-sync status [game]
-  ashen-sync pull [game] [--prefer local|remote]
-  ashen-sync push [game] [--prefer local|remote]
-  ashen-sync play <game> [--prefer local|remote]
-  ashen-sync watch
+  save-channeler init
+  save-channeler doctor
+  save-channeler games
+  save-channeler status [game]
+  save-channeler pull [game] [--prefer local|remote]
+  save-channeler push [game] [--prefer local|remote]
+  save-channeler play <game> [--prefer local|remote]
+  save-channeler watch
 `)
 	fmt.Print(guiUsageLine())
-	fmt.Print(`  ashen-sync version
+	fmt.Print(`  save-channeler version
 
 Games: ds2 | ds3 | ds2-vanilla
 
-Security: Ashen Sync never embeds cloud API secrets. Configure rclone yourself
+Security: Save Channeler never embeds cloud API secrets. Configure rclone yourself
 and point this tool at a dedicated remote folder.
 
 Runtime targets: Windows, Linux, Steam Deck (not macOS — DS2/DS3 are not native there).
@@ -89,7 +94,7 @@ Runtime targets: Windows, Linux, Steam Deck (not macOS — DS2/DS3 are not nativ
 func loadCfg() (config.Config, error) {
 	cfg, err := config.Load()
 	if errors.Is(err, os.ErrNotExist) {
-		return config.Default(), fmt.Errorf("config not found; run `ashen-sync init`")
+		return config.Default(), fmt.Errorf("config not found; run `save-channeler init`")
 	}
 	return cfg, err
 }
@@ -163,7 +168,7 @@ func cmdInit() error {
 	}
 	p, _ := config.Path()
 	fmt.Println("Wrote", p)
-	fmt.Println("Tip: use a dedicated cloud folder only for ashen-sync.")
+	fmt.Println("Tip: use a dedicated cloud folder only for save-channeler.")
 	return nil
 }
 
@@ -297,7 +302,7 @@ func cmdWatch() error {
 			fmt.Printf("%s [%s] %s\n", ev.Time.Format(time.RFC3339), ev.Level, ev.Message)
 		},
 		OnConflict: func(c *syncer.ConflictError) {
-			fmt.Printf("CONFLICT: %s\nUse ashen-sync pull/push --prefer local|remote\n", c.Error())
+			fmt.Printf("CONFLICT: %s\nUse save-channeler pull/push --prefer local|remote\n", c.Error())
 		},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

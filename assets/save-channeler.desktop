@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Save Channeler
+Comment=Cloud saves for Dark Souls II and III via rclone
+Exec=save-channeler gui
+Icon=save-channeler
+Terminal=false
+Categories=Game;Utility;
+Keywords=darksouls;saves;rclone;steam;channeler;

@@ -9,5 +9,5 @@ func runGUI() error {
 }
 
 func guiUsageLine() string {
-	return "  ashen-sync gui\n"
+	return "  save-channeler gui\n"
 }

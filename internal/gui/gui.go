@@ -13,12 +13,12 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/migzeetigglez/ashen-sync/internal/config"
-	"github.com/migzeetigglez/ashen-sync/internal/detect"
 	"github.com/migzeetigglez/ashen-sync/internal/syncer"
 	"github.com/migzeetigglez/ashen-sync/internal/watch"
 )
@@ -31,9 +31,12 @@ func Run() error {
 		return err
 	}
 
-	a := app.NewWithID("com.ashen-sync.app")
-	w := a.NewWindow("Ashen Sync")
-	w.Resize(fyne.NewSize(820, 600))
+	a := app.NewWithID("com.savechanneler.app")
+	icon := appIcon()
+	a.SetIcon(icon)
+	w := a.NewWindow("Save Channeler")
+	w.SetIcon(icon)
+	w.Resize(fyne.NewSize(880, 560))
 
 	eng, err := syncer.New(cfg)
 	if err != nil {
@@ -42,7 +45,7 @@ func Run() error {
 
 	logEntry := widget.NewMultiLineEntry()
 	logEntry.Disable()
-	logEntry.SetMinRowsVisible(14)
+	logEntry.SetMinRowsVisible(6)
 
 	var mu sync.Mutex
 	appendLog := func(line string) {
@@ -58,15 +61,47 @@ func Run() error {
 	}
 	eng.Log = appendLog
 
+	// --- Left column ---
+	title := widget.NewRichTextFromMarkdown("# Save Channeler")
+	purpose := widget.NewLabel("Sync Dark Souls II & III saves across your PCs with rclone.")
+	purpose.Wrapping = fyne.TextWrapWord
+
+	remoteLabel := widget.NewLabel("")
+	remoteLabel.Wrapping = fyne.TextWrapWord
+	setupBtn := widget.NewButton("Link Google Drive", nil)
+	setupBtn.Importance = widget.HighImportance
+	resetBtn := widget.NewButton("Change destination…", nil)
+	resetBtn.Importance = widget.LowImportance
+
+	leftRemoteBox := container.NewVBox()
+
+	refreshLeftRemote := func() {
+		leftRemoteBox.Objects = nil
+		if remoteConfigured(cfg) {
+			remoteLabel.SetText("Remote: " + cfg.RemoteRoot())
+			leftRemoteBox.Add(remoteLabel)
+			leftRemoteBox.Add(resetBtn)
+		} else {
+			leftRemoteBox.Add(setupBtn)
+		}
+		leftRemoteBox.Refresh()
+	}
+
+	iconImg := canvas.NewImageFromResource(icon)
+	iconImg.FillMode = canvas.ImageFillContain
+	iconImg.SetMinSize(fyne.NewSize(220, 220))
+
+	left := container.NewBorder(
+		container.NewVBox(title, purpose, leftRemoteBox),
+		nil, nil, nil,
+		container.NewCenter(iconImg),
+	)
+
+	// --- Right column ---
 	gameSelect := widget.NewSelect([]string{"ds2", "ds3", "ds2-vanilla"}, nil)
 	gameSelect.SetSelected("ds3")
-
 	statusLabel := widget.NewLabel("Status: —")
 	statusLabel.Wrapping = fyne.TextWrapWord
-	remoteLabel := widget.NewLabel(fmt.Sprintf("Remote: %s", cfg.RemoteRoot()))
-	if cfg.Remote == "" {
-		remoteLabel.SetText("Remote: not configured — run: ashen-sync init")
-	}
 
 	showConflict := func(c *syncer.ConflictError, name string, fn func(context.Context, syncer.Prefer) error) {
 		fyne.Do(func() {
@@ -106,6 +141,10 @@ func Run() error {
 	}
 
 	refreshStatus := func() {
+		if !remoteConfigured(cfg) {
+			fyne.Do(func() { statusLabel.SetText("Status: link Google Drive to get started") })
+			return
+		}
 		id := gameSelect.Selected
 		go func() {
 			st, err := eng.Status(context.Background(), id)
@@ -115,7 +154,7 @@ func Run() error {
 					return
 				}
 				statusLabel.SetText(fmt.Sprintf(
-					"Status: %s | path=%s | local=%s | remote=%s | in_sync=%v",
+					"Status: %s\nPath: %s\nLocal: %s  ·  Cloud: %s  ·  In sync: %v",
 					st.Location.Game.ID,
 					st.Location.Path,
 					trunc(st.LocalHash),
@@ -128,6 +167,10 @@ func Run() error {
 	gameSelect.OnChanged = func(string) { refreshStatus() }
 
 	runAction := func(name string, fn func(context.Context, string, syncer.Prefer) error) {
+		if !remoteConfigured(cfg) {
+			dialog.ShowInformation("Setup needed", "Link Google Drive first (button on the left).", w)
+			return
+		}
 		id := gameSelect.Selected
 		go func() {
 			appendLog(name + " " + id + "…")
@@ -147,15 +190,19 @@ func Run() error {
 		}()
 	}
 
+	refreshBtn := widget.NewButton("Refresh", refreshStatus)
 	pullBtn := widget.NewButton("Pull", func() { runAction("pull", eng.Pull) })
 	pushBtn := widget.NewButton("Push", func() { runAction("push", eng.Push) })
 	playBtn := widget.NewButton("Play", func() { runAction("play", eng.Play) })
-
-	watchBtn := widget.NewButton("Start watcher", nil)
+	watchBtn := widget.NewButton("Start Watcher", nil)
 	watchBtn.OnTapped = func() {
+		if !remoteConfigured(cfg) {
+			dialog.ShowInformation("Setup needed", "Link Google Drive first (button on the left).", w)
+			return
+		}
 		if watcher.Running() {
 			watcher.Stop()
-			watchBtn.SetText("Start watcher")
+			watchBtn.SetText("Start Watcher")
 			appendLog("watcher stopped")
 			return
 		}
@@ -163,43 +210,111 @@ func Run() error {
 			dialog.ShowError(err, w)
 			return
 		}
-		watchBtn.SetText("Stop watcher")
-		appendLog("watcher started (debounced; skips while game runs)")
+		watchBtn.SetText("Stop Watcher")
+		appendLog("watcher started")
 	}
 
-	refreshBtn := widget.NewButton("Refresh", refreshStatus)
-
-	gamesList := widget.NewLabel("")
-	gamesList.Wrapping = fyne.TextWrapWord
-	refreshGames := func() {
-		locs, err := detect.FindSaves(cfg.GameOverrides)
-		if err != nil {
-			gamesList.SetText(err.Error())
+	applyConfig := func(newCfg config.Config) {
+		cfg = newCfg
+		newEng, eerr := syncer.New(cfg)
+		if eerr != nil {
+			dialog.ShowError(eerr, w)
 			return
 		}
-		var b strings.Builder
-		for _, loc := range locs {
-			fmt.Fprintf(&b, "• %s — %s\n  %s\n  exists=%v  platform=%s\n\n",
-				loc.Game.ID, loc.Game.Name, loc.Path, loc.Exists, loc.Platform)
-		}
-		if b.Len() == 0 {
-			b.WriteString("No save folders detected yet.")
-		}
-		gamesList.SetText(b.String())
+		eng = newEng
+		eng.Log = appendLog
+		watcher.Engine = eng
+		watcher.QuietPeriod = cfg.QuietPeriod()
+		watcher.PullInterval = cfg.PullInterval()
+		refreshLeftRemote()
+		refreshStatus()
 	}
 
-	header := container.NewVBox(
-		widget.NewRichTextFromMarkdown("## Ashen Sync\nOpen DS2/DS3 cloud saves via **your** rclone remote. No embedded API secrets."),
-		remoteLabel,
-		container.NewHBox(widget.NewLabel("Game"), gameSelect, refreshBtn),
-		statusLabel,
-		container.NewHBox(pullBtn, pushBtn, playBtn, watchBtn),
-	)
+	setupBtn.OnTapped = func() {
+		pathEntry := widget.NewEntry()
+		pathEntry.SetText("save-channeler")
+		form := widget.NewForm(
+			widget.NewFormItem("Folder in Drive", pathEntry),
+		)
+		dialog.ShowCustomConfirm("Link Google Drive", "Connect", "Cancel", form, func(ok bool) {
+			if !ok {
+				return
+			}
+			folder := strings.TrimSpace(pathEntry.Text)
+			if folder == "" {
+				folder = "save-channeler"
+			}
+			setupBtn.Disable()
+			appendLog("Starting Google Drive setup…")
+			prog := dialog.NewProgressInfinite("Linking Google Drive", "Waiting for Google sign-in in your browser…", w)
+			prog.Show()
+			go func() {
+				newCfg, err := setupGoogleDrive(context.Background(), cfg.RclonePath, folder, appendLog)
+				fyne.Do(func() {
+					prog.Hide()
+					setupBtn.Enable()
+					if err != nil {
+						dialog.ShowError(err, w)
+						return
+					}
+					applyConfig(newCfg)
+					dialog.ShowInformation("Connected", "Saves will sync to "+newCfg.RemoteRoot(), w)
+				})
+			}()
+		}, w)
+	}
 
-	w.SetContent(container.NewBorder(header, nil, nil, nil,
-		container.NewVSplit(container.NewVScroll(gamesList), container.NewVScroll(logEntry)),
-	))
-	refreshGames()
+	resetBtn.OnTapped = func() {
+		msg := "Disconnect Google Drive and clear the sync destination?\n\n" +
+			"Current: " + cfg.RemoteRoot() + "\n\n" +
+			"• Signs out the linked Google account from Save Channeler\n" +
+			"• Cloud save files are not deleted\n" +
+			"• Next “Link Google Drive” will open Google so you can pick another account"
+		dialog.ShowConfirm("Reset destination", msg, func(ok bool) {
+			if !ok {
+				return
+			}
+			if watcher.Running() {
+				watcher.Stop()
+				watchBtn.SetText("Start Watcher")
+			}
+			resetBtn.Disable()
+			appendLog("Disconnecting Google Drive…")
+			prog := dialog.NewProgressInfinite("Resetting", "Disconnecting Google Drive…", w)
+			prog.Show()
+			go func() {
+				derr := disconnectGoogleDrive(context.Background(), cfg.RclonePath, appendLog)
+				fyne.Do(func() {
+					prog.Hide()
+					resetBtn.Enable()
+					if derr != nil {
+						dialog.ShowError(derr, w)
+						return
+					}
+					if err := cfg.ClearRemote(); err != nil {
+						dialog.ShowError(err, w)
+						return
+					}
+					appendLog("ready — link Google Drive with the account you want")
+					applyConfig(cfg)
+				})
+			}()
+		}, w)
+	}
+
+	gameRow := container.NewBorder(nil, nil, widget.NewLabel("Game"), refreshBtn, gameSelect)
+	actions := container.NewVBox(pullBtn, pushBtn, playBtn, watchBtn)
+	rightTop := container.NewVBox(gameRow, widget.NewSeparator(), statusLabel, widget.NewSeparator(), actions)
+	right := container.NewBorder(rightTop, nil, nil, nil, container.NewPadded(container.NewVScroll(logEntry)))
+
+	split := container.NewHSplit(
+		container.NewPadded(left),
+		container.NewPadded(right),
+	)
+	split.SetOffset(0.40)
+
+	refreshLeftRemote()
+	w.SetContent(split)
 	refreshStatus()
 	w.ShowAndRun()
 	watcher.Stop()

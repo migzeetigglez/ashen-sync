@@ -1,27 +1,31 @@
-# Ashen Sync
+# Save Channeler
 
 Open-source cloud saves for **DARK SOULS II** and **DARK SOULS III** on Steam — **Windows, Linux, and Steam Deck**.
 
+CLI binary: **`save-channeler`**.
+
 macOS is a fine place to **develop and cross-compile**, but not a runtime target: DS2/DS3 do not ship native Mac Steam builds, so save sync belongs on the machines where you actually play.
 
-FromSoftware never shipped Steam Cloud for these titles. Ashen Sync fills that gap **without** embedding Dropbox/Google API secrets and **without** running a sync server that sees your saves.
+FromSoftware never shipped Steam Cloud for these titles. Save Channeler fills that gap **without** embedding Dropbox/Google API secrets and **without** running a sync server that sees your saves.
 
 ## Security model
 
-- **Your cloud, your credentials.** Sync uses a rclone remote *you* configure (`rclone config`). Ashen Sync only shells out to `rclone`.
+- **Your cloud, your credentials.** Sync uses a rclone remote *you* configure (`rclone config`). Save Channeler only shells out to `rclone`.
 - **No embedded OAuth client secrets** in this repo or binary.
-- **No central Ashen Sync server.** We never receive your save files.
+- **No central sync server.** We never receive your save files.
 - **No silent overwrites.** Divergent local/remote saves produce a conflict; you choose local or remote. Local snapshots are kept before replace.
 - **No save-folder symlinks into cloud storage.** That pattern has corrupted Souls saves when the provider locks files mid-write.
 - **No telemetry.**
 
-Threat note: whoever can use your rclone remote can read/write the dedicated folder you pointed at. Use a folder that exists only for Ashen Sync.
+Threat note: whoever can use your rclone remote can read/write the dedicated folder you pointed at. Use a folder that exists only for Save Channeler.
 
 ## How it works
 
 1. **`play`** — pull → launch via `steam://rungameid/...` → wait for exit → push  
 2. **`watch`** — background watcher with debounce; pushes only after a quiet period **and** only when the game process is not running; idle pulls on an interval  
 3. **`gui`** — Fyne desktop UI for status, pull/push/play, watcher, and conflicts  
+
+App icon (Channeler helm + beige fedora) lives in [`assets/icon.png`](assets/icon.png) and is embedded in GUI builds.
 
 ## Install
 
@@ -31,55 +35,59 @@ Threat note: whoever can use your rclone remote can read/write the dedicated fol
 - Steam + DS2 SotFS and/or DS3
 - Go 1.22+ to build from source
 
-### Build (on a gaming PC / Deck)
+### Package for Linux / Steam Deck / Windows
+
+From this repo (works when cross-compiling from a Mac too):
+
+```bash
+./scripts/package-linux.sh      # → dist/save-channeler-linux-amd64.tar.gz
+./scripts/package-windows.sh    # → dist/save-channeler-windows-amd64.zip
+./scripts/package-macos.sh      # → dist/Save Channeler.app (dev machine)
+```
+
+**Linux / Deck:** copy the tarball over, then:
+
+```bash
+tar xzf save-channeler-linux-amd64.tar.gz
+cd save-channeler-linux-amd64
+./install.sh                    # installs to ~/.local/bin + .desktop launcher
+```
+
+**Windows:** extract the zip, install [rclone](https://rclone.org/install/), run `save-channeler.exe doctor`. Use `play-ds3.bat` after setup. Cross-built zips are CLI-only; build on Windows (without `-tags nogui`) for the GUI.
+
+### Build manually
 
 ```bash
 git clone https://github.com/migzeetigglez/ashen-sync.git
 cd ashen-sync
-go build -o ashen-sync ./cmd/ashen-sync
+go build -o save-channeler ./cmd/save-channeler   # GUI needs CGO + OpenGL on that OS
 ```
-
-GUI builds need CGO + OpenGL libs on that OS.
-
-### Cross-compile CLI from a Mac (no GUI)
-
-Fyne needs per-OS native builds. For Deck/Linux/Windows CLI + watcher from macOS:
-
-```bash
-# Linux / Steam Deck
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags nogui -o dist/ashen-sync-linux-amd64 ./cmd/ashen-sync
-
-# Windows
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags nogui -o dist/ashen-sync-windows-amd64.exe ./cmd/ashen-sync
-```
-
-Copy the binary + install [rclone](https://rclone.org/install/) on the play machine, then run `ashen-sync init` there. CI also builds platform artifacts on push.
 
 ### One-time setup
 
 ```bash
-rclone config          # create a remote; prefer a dedicated folder
-./ashen-sync init      # pick remote name + path (default: ashen-sync)
-./ashen-sync doctor
+rclone config                 # create a remote; prefer a dedicated folder
+./save-channeler init         # pick remote name + path (default: save-channeler)
+./save-channeler doctor
 ```
 
 ## Usage
 
 ```bash
-./ashen-sync games
-./ashen-sync status ds3
-./ashen-sync pull ds3
-./ashen-sync push ds3
-./ashen-sync play ds3
-./ashen-sync watch
-./ashen-sync gui
+./save-channeler games
+./save-channeler status ds3
+./save-channeler pull ds3
+./save-channeler push ds3
+./save-channeler play ds3
+./save-channeler watch
+./save-channeler gui
 ```
 
 Conflict resolution:
 
 ```bash
-./ashen-sync pull ds3 --prefer remote
-./ashen-sync push ds3 --prefer local
+./save-channeler pull ds3 --prefer remote
+./save-channeler push ds3 --prefer local
 ```
 
 Games: `ds2` (Scholar of the First Sin), `ds3`, `ds2-vanilla`.
@@ -87,21 +95,23 @@ Games: `ds2` (Scholar of the First Sin), `ds3`, `ds2-vanilla`.
 ### Steam Deck
 
 1. Desktop Mode: install rclone (static binary in `$HOME/bin` is fine).
-2. `rclone config` + `ashen-sync init`.
+2. `rclone config` + `save-channeler init`.
 3. For Game Mode, add a non-Steam shortcut or game launch option that runs:
-   ` /path/to/ashen-sync play ds3 `
-4. Optional: run `ashen-sync watch` from Desktop Mode / autostart when you want idle sync without the launch wrapper.
+   `/path/to/save-channeler play ds3`
+4. Optional: run `save-channeler watch` from Desktop Mode / autostart when you want idle sync without the launch wrapper.
 
 ### Config
 
-- Linux/macOS: `~/.config/ashen-sync/config.toml`
-- Windows: `%APPDATA%\ashen-sync\config.toml`
-- Snapshots: `~/.local/share/ashen-sync/snapshots/` (Windows: `%LOCALAPPDATA%\ashen-sync\snapshots\`)
+- Linux/macOS: `~/.config/save-channeler/config.toml`
+- Windows: `%APPDATA%\save-channeler\config.toml`
+- Snapshots: `~/.local/share/save-channeler/snapshots/` (Windows: `%LOCALAPPDATA%\save-channeler\snapshots\`)
+
+Legacy `~/.config/ashen-sync/` configs are still read if the new path is missing.
 
 ```toml
 rclone_path = "rclone"
 remote = "gdrive"
-remote_path = "ashen-sync"
+remote_path = "save-channeler"
 snapshot_keep = 10
 quiet_period_seconds = 15
 pull_interval_seconds = 300
@@ -125,7 +135,7 @@ AppIDs: SotFS `335300`, DS3 `374320`, vanilla DS2 `236430`.
 
 ## Why not Dropbox junctions?
 
-Cloud clients often lock files while uploading. Dark Souls writes saves frequently; a lock mid-write can corrupt the slot. Ashen Sync copies through a staging area via rclone and never mounts the live save directory as a cloud folder.
+Cloud clients often lock files while uploading. Dark Souls writes saves frequently; a lock mid-write can corrupt the slot. Save Channeler copies through a staging area via rclone and never mounts the live save directory as a cloud folder.
 
 ## License
 
