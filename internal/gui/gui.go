@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,9 +21,12 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	fynetooltip "github.com/dweymouth/fyne-tooltip"
+	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
 	"github.com/migzeetigglez/ashen-sync/internal/config"
 	"github.com/migzeetigglez/ashen-sync/internal/detect"
+	"github.com/migzeetigglez/ashen-sync/internal/mods"
 	"github.com/migzeetigglez/ashen-sync/internal/syncer"
 	"github.com/migzeetigglez/ashen-sync/internal/watch"
 )
@@ -51,36 +55,56 @@ func Run() error {
 		return err
 	}
 
-	logEntry := widget.NewMultiLineEntry()
-	logEntry.Disable()
-	logEntry.SetMinRowsVisible(6)
-	logEntry.TextStyle = fyne.TextStyle{Monospace: true}
-	// Disabled Entry uses ColorNameDisabled (low contrast). Force foreground.
 	baseTheme := a.Settings().Theme()
 	if baseTheme == nil {
 		baseTheme = theme.DefaultTheme()
 	}
-	logView := container.NewThemeOverride(logEntry, contrastLogTheme{base: baseTheme})
+
+	logRich := widget.NewRichText()
+	logRich.Wrapping = fyne.TextWrapBreak
+	logScroll := container.NewVScroll(logRich)
+	// Don't let long lines dictate window/split MinSize — fill allocated space only.
+	logPane := container.New(&shrinkFillLayout{}, logScroll)
+
+	const (
+		logToneNormal   = iota
+		logToneValidate // Validate Saves — distinct color in the activity log
+	)
 
 	var mu sync.Mutex
-	appendLog := func(line string) {
+	appendLogTone := func(line string, tone int) {
 		fyne.Do(func() {
 			mu.Lock()
 			defer mu.Unlock()
-			cur := logEntry.Text
-			if cur != "" {
-				cur += "\n"
+			colorName := theme.ColorNameForeground
+			switch tone {
+			case logToneValidate:
+				colorName = theme.ColorNamePrimary
 			}
-			logEntry.SetText(cur + time.Now().Format("15:04:05") + " " + line)
+			seg := &widget.TextSegment{
+				Text: time.Now().Format("15:04:05") + " " + line + "\n",
+				Style: widget.RichTextStyle{
+					ColorName: colorName,
+					SizeName:  theme.SizeNameText,
+					TextStyle: fyne.TextStyle{Monospace: true},
+				},
+			}
+			logRich.Segments = append(logRich.Segments, seg)
+			logRich.Refresh()
+			logScroll.ScrollToBottom()
 		})
+	}
+	appendLog := func(line string) {
+		appendLogTone(line, logToneNormal)
 	}
 	eng.Log = appendLog
 
 	var applyConfig func(config.Config)
 
 	// --- Right column controls needed early for local-path refresh ---
-	gameSelect := widget.NewSelect([]string{"ds2", "ds3", "ds2-vanilla"}, nil)
+	gameSelect := ttwidget.NewSelect([]string{"ds2", "ds3", "ds2-vanilla"}, nil)
 	gameSelect.SetSelected("ds3")
+	gameSelect.SetToolTip("Which game’s saves to sync and show mods for.")
 	statusLabel := widget.NewLabel("Status: —")
 	statusLabel.Wrapping = fyne.TextWrapWord
 
@@ -98,16 +122,19 @@ func Run() error {
 	remotePathEntry.SetPlaceHolder("Select remote save folder…")
 	remotePathEntry.Disable()
 	remotePathView := container.NewThemeOverride(remotePathEntry, contrastLogTheme{base: baseTheme})
-	remoteBtn := widget.NewButton("Set", nil)
+	remoteBtn := ttwidget.NewButton("Set", nil)
+	remoteBtn.SetToolTip("Link Google Drive as the cloud sync destination, or change / disconnect the linked account. The path below updates per selected game.")
 
 	localPathEntry := widget.NewEntry()
 	localPathEntry.SetPlaceHolder("Select local save folder…")
 	localPathEntry.Disable()
 	localPathView := container.NewThemeOverride(localPathEntry, contrastLogTheme{base: baseTheme})
-	localBtn := widget.NewButton("Browse", nil)
+	localBtn := ttwidget.NewButton("Browse", nil)
+	localBtn.SetToolTip("Choose the local save folder for the selected game.")
 
 	// Match label + button column widths so the outlined fields align.
 	labelColW := maxFloat32(
+		widget.NewLabel("Game:").MinSize().Width,
 		widget.NewLabel("Remote:").MinSize().Width,
 		widget.NewLabel("Local:").MinSize().Width,
 	)
@@ -118,15 +145,30 @@ func Run() error {
 	)
 
 	refreshLeftRemote := func() {
-		if remoteConfigured(cfg) {
-			remotePathEntry.SetText(cfg.RemoteRoot())
-			remoteBtn.SetText("Change")
-		} else {
+		if !remoteConfigured(cfg) {
 			remotePathEntry.SetText("")
 			remotePathEntry.SetPlaceHolder("Select remote save folder…")
 			remoteBtn.SetText("Set")
+			return
 		}
+		remoteBtn.SetText("Change")
+		id := gameSelect.Selected
+		if id == "" {
+			id = "ds3"
+		}
+		// Per-game cloud path under the Drive root (same root for all games).
+		var full string
+		if loc, err := detect.FindGame(id, cfg.GameOverrides); err == nil && loc.SteamID != "" {
+			full = fmt.Sprintf("%s/%s/%s", cfg.RemoteRoot(), loc.Game.RemoteKey, loc.SteamID)
+		} else if g, ok := detect.ByID(id); ok {
+			full = fmt.Sprintf("%s/%s/…", cfg.RemoteRoot(), g.RemoteKey)
+		} else {
+			full = cfg.RemoteRoot()
+		}
+		remotePathEntry.SetText(displayPath(full))
 	}
+
+	var refreshModsList func(gameID, saveDir string)
 
 	refreshLeftLocal := func() {
 		id := gameSelect.Selected
@@ -147,9 +189,10 @@ func Run() error {
 			localPathEntry.SetPlaceHolder("Select local save folder…")
 			localBtn.SetText("Browse")
 		} else {
-			localPathEntry.SetText(path)
+			localPathEntry.SetText(displayPath(path))
 			localBtn.SetText("Change")
 		}
+		refreshModsList(id, path)
 	}
 
 	localBtn.OnTapped = func() {
@@ -196,6 +239,12 @@ func Run() error {
 		}, w)
 	}
 
+	gameRow := container.NewBorder(
+		nil, nil,
+		fixedWidth(labelColW, widget.NewLabel("Game:")),
+		nil,
+		gameSelect,
+	)
 	remoteRow := container.NewBorder(
 		nil, nil,
 		fixedWidth(labelColW, widget.NewLabel("Remote:")),
@@ -209,11 +258,16 @@ func Run() error {
 		localPathView,
 	)
 
-	autoDetectBtn := widget.NewButton("Auto-detect save folder", nil)
+	autoDetectBtn := ttwidget.NewButton("Auto-detect save folder", nil)
 	autoDetectBtn.Importance = widget.HighImportance
+	autoDetectBtn.SetToolTip("Search this PC for a Dark Souls save folder and set it as Local.")
+	validateSavesBtn := ttwidget.NewButton("Validate Saves", nil)
+	validateSavesBtn.Importance = widget.HighImportance
+	validateSavesBtn.SetToolTip("Re-check whether the local and cloud saves match for the selected game.")
 	pillTheme := pillButtonTheme{base: baseTheme}
-	autoDetectPill := container.NewCenter(
+	pillRow := container.NewGridWithColumns(2,
 		container.NewThemeOverride(autoDetectBtn, pillTheme),
+		container.NewThemeOverride(validateSavesBtn, pillTheme),
 	)
 
 	// runAutoDetect finds/validates a save folder. quietSkip hides the "already set" dialog (first-run).
@@ -295,35 +349,132 @@ func Run() error {
 	autoDetectGap := canvas.NewRectangle(color.Transparent)
 	autoDetectGap.SetMinSize(fyne.NewSize(1, 15))
 
-	left := container.NewVBox(
+	modsHeading := widget.NewLabelWithStyle("Mods", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	modsEmpty := widget.NewLabel("No mod log in this save folder.")
+	modsEmpty.Wrapping = fyne.TextWrapWord
+	modsListBox := container.NewVBox()
+	modsBody := container.NewVBox(modsEmpty, modsListBox)
+	modsScroll := container.NewVScroll(modsBody)
+	modsScroll.SetMinSize(fyne.NewSize(0, 120))
+	modsSection := container.NewBorder(modsHeading, nil, nil, nil, modsScroll)
+
+	refreshModsUI := func() {
+		modsListBox.Refresh()
+		modsBody.Refresh()
+		modsScroll.Refresh()
+		modsSection.Refresh()
+	}
+
+	refreshModsList = func(gameID, saveDir string) {
+		modsListBox.Objects = nil
+		g, ok := detect.ByID(gameID)
+		if !ok {
+			modsHeading.SetText("Mods")
+			modsEmpty.SetText("Mods are only tracked for DS2, DS2 SotFS, and DS3.")
+			modsEmpty.Show()
+			refreshModsUI()
+			return
+		}
+		label := shortGameLabel(g.ID)
+		modsHeading.SetText("Mods (" + label + ")")
+
+		var logEntries []mods.Entry
+		if saveDir != "" && saveDirLooksLikeGame(saveDir, g) {
+			_, entries, err := mods.Load(saveDir)
+			if err != nil {
+				modsEmpty.SetText("Could not read mod log: " + err.Error())
+				modsEmpty.Show()
+				refreshModsUI()
+				return
+			}
+			logEntries = entries
+		}
+
+		exeDir := detect.FindExeDir(g)
+		autoEntries := mods.DetectInstall(g.ID, exeDir)
+		entries := mods.Merge(autoEntries, logEntries)
+
+		if len(entries) == 0 {
+			modsEmpty.SetText("No mods detected for this " + label + " install.")
+			modsEmpty.Show()
+			refreshModsUI()
+			return
+		}
+		modsEmpty.Hide()
+		for _, e := range entries {
+			e := e
+			if e.URL != "" {
+				u, perr := url.Parse(e.URL)
+				if perr == nil && u.Scheme != "" {
+					modsListBox.Add(widget.NewHyperlink(e.Name, u))
+					continue
+				}
+			}
+			modsListBox.Add(widget.NewLabel("• " + e.Name))
+		}
+		refreshModsUI()
+	}
+
+	scaleRow := newUIScaleControl(&cfg, w, func(updated config.Config) {
+		cfg = updated
+	})
+
+	leftTop := container.NewVBox(
+		scaleRow,
+		widget.NewSeparator(),
 		title,
 		purpose,
 		container.NewCenter(iconImg),
 		widget.NewSeparator(),
+		gameRow,
 		remoteRow,
 		localRow,
 		autoDetectGap,
-		autoDetectPill,
+		pillRow,
+		widget.NewSeparator(),
 	)
+	// Mods fill remaining height and scroll when the list is long.
+	leftInner := container.NewBorder(leftTop, nil, nil, nil, modsSection)
+	left := container.New(&shrinkFillLayout{}, leftInner)
 
-	showConflict := func(c *syncer.ConflictError, name string, fn func(context.Context, syncer.Prefer) error) {
+	var refreshStatus func()
+
+	showConflict := func(c *syncer.ConflictError) {
 		fyne.Do(func() {
-			msg := widget.NewLabel(c.Error() + "\n\nUse local (upload this machine) or remote (download cloud copy).")
+			msg := widget.NewLabel(c.Error() + "\n\n" +
+				"Use local — keep this PC’s save and upload it to the cloud (local file stays).\n" +
+				"Use remote — download the cloud save over this PC’s copy (a snapshot is kept first).\n\n" +
+				"Cancel / close — do nothing; your local save is unchanged.")
 			msg.Wrapping = fyne.TextWrapWord
-			d := dialog.NewCustomConfirm("Save conflict", "Use local", "Use remote", msg, func(useLocal bool) {
+
+			d := dialog.NewCustomWithoutButtons("Save conflict", msg, w)
+			resolve := func(keepLocal bool) {
+				d.Hide()
 				go func() {
-					pref := syncer.PreferRemote
-					if useLocal {
-						pref = syncer.PreferLocal
+					var err error
+					if keepLocal {
+						appendLog("conflict: keeping local, uploading…")
+						err = eng.Push(context.Background(), c.GameID, syncer.PreferLocal)
+					} else {
+						appendLog("conflict: using remote, downloading…")
+						err = eng.Pull(context.Background(), c.GameID, syncer.PreferRemote)
 					}
-					if err := fn(context.Background(), pref); err != nil {
-						appendLog(name + " failed: " + err.Error())
+					if err != nil {
+						appendLog("conflict resolve failed: " + err.Error())
 						return
 					}
-					appendLog(name + " ok")
+					appendLog("conflict resolve ok")
+					if refreshStatus != nil {
+						refreshStatus()
+					}
 				}()
-			}, w)
-			d.Resize(fyne.NewSize(480, 220))
+			}
+			cancelBtn := widget.NewButton("Cancel", func() { d.Hide() })
+			remoteBtn := widget.NewButton("Use remote", func() { resolve(false) })
+			localBtn := widget.NewButton("Use local", func() { resolve(true) })
+			localBtn.Importance = widget.HighImportance
+			d.SetButtons([]fyne.CanvasObject{cancelBtn, remoteBtn, localBtn})
+			d.Resize(fyne.NewSize(540, 300))
 			d.Show()
 		})
 	}
@@ -335,15 +486,13 @@ func Run() error {
 		OnEvent: func(ev watch.Event) {
 			appendLog(fmt.Sprintf("[%s] %s", ev.Level, ev.Message))
 		},
-		OnConflict: func(c *syncer.ConflictError) {
-			appendLog("conflict: " + c.Error())
-			showConflict(c, "pull", func(ctx context.Context, prefer syncer.Prefer) error {
-				return eng.Pull(ctx, c.GameID, prefer)
-			})
+		OnConflict: func(c *syncer.ConflictError, action string) {
+			appendLog("conflict (" + action + "): " + c.Error())
+			showConflict(c)
 		},
 	}
 
-	refreshStatus := func() {
+	refreshStatus = func() {
 		if !remoteConfigured(cfg) {
 			fyne.Do(func() { statusLabel.SetText("Status: set a remote destination to get started") })
 			return
@@ -359,7 +508,7 @@ func Run() error {
 				statusLabel.SetText(fmt.Sprintf(
 					"Status: %s\nPath: %s\nLocal: %s  ·  Cloud: %s  ·  In sync: %v",
 					st.Location.Game.ID,
-					st.Location.Path,
+					displayPath(st.Location.Path),
 					trunc(st.LocalHash),
 					trunc(st.RemoteHash),
 					st.InSync,
@@ -367,7 +516,58 @@ func Run() error {
 			})
 		}()
 	}
+	validateSavesBtn.OnTapped = func() {
+		id := gameSelect.Selected
+		if id == "" {
+			id = "ds3"
+		}
+		if !remoteConfigured(cfg) {
+			appendLogTone("Validate Saves: set a remote destination first", logToneValidate)
+			statusLabel.SetText("Status: set a remote destination to get started")
+			return
+		}
+		appendLogTone("Validate Saves: checking "+id+"…", logToneValidate)
+		validateSavesBtn.Disable()
+		go func() {
+			st, err := eng.Status(context.Background(), id)
+			fyne.Do(func() {
+				validateSavesBtn.Enable()
+				if err != nil {
+					statusLabel.SetText("Status: " + err.Error())
+					appendLogTone("Validate Saves failed: "+err.Error(), logToneValidate)
+					return
+				}
+				statusLabel.SetText(fmt.Sprintf(
+					"Status: %s\nPath: %s\nLocal: %s  ·  Cloud: %s  ·  In sync: %v",
+					st.Location.Game.ID,
+					displayPath(st.Location.Path),
+					trunc(st.LocalHash),
+					trunc(st.RemoteHash),
+					st.InSync,
+				))
+				if st.InSync {
+					appendLogTone(fmt.Sprintf(
+						"Validate Saves: %s in sync (local=%s cloud=%s)",
+						st.Location.Game.ID, trunc(st.LocalHash), trunc(st.RemoteHash),
+					), logToneValidate)
+					return
+				}
+				if st.RemoteHash == "" {
+					appendLogTone(fmt.Sprintf(
+						"Validate Saves: %s has no cloud save yet (local=%s)",
+						st.Location.Game.ID, trunc(st.LocalHash),
+					), logToneValidate)
+					return
+				}
+				appendLogTone(fmt.Sprintf(
+					"Validate Saves: %s out of sync (local=%s cloud=%s)",
+					st.Location.Game.ID, trunc(st.LocalHash), trunc(st.RemoteHash),
+				), logToneValidate)
+			})
+		}()
+	}
 	gameSelect.OnChanged = func(string) {
+		refreshLeftRemote()
 		refreshLeftLocal()
 		refreshStatus()
 	}
@@ -382,9 +582,7 @@ func Run() error {
 			appendLog(name + " " + id + "…")
 			err := fn(context.Background(), id, syncer.PreferAbort)
 			if c, ok := syncer.IsConflict(err); ok {
-				showConflict(c, name, func(ctx context.Context, prefer syncer.Prefer) error {
-					return fn(ctx, id, prefer)
-				})
+				showConflict(c)
 				return
 			}
 			if err != nil {
@@ -396,11 +594,12 @@ func Run() error {
 		}()
 	}
 
-	refreshBtn := widget.NewButton("Refresh", refreshStatus)
-	pullBtn := widget.NewButton("Pull", func() { runAction("pull", eng.Pull) })
-	pushBtn := widget.NewButton("Push", func() { runAction("push", eng.Push) })
-	playBtn := widget.NewButton("Play", func() { runAction("play", eng.Play) })
-	watchBtn := widget.NewButton("Start Watcher", nil)
+	pullBtn := ttwidget.NewButton("Pull", func() { runAction("pull", eng.Pull) })
+	pullBtn.SetToolTip("Download this game’s cloud save onto this PC.")
+	pushBtn := ttwidget.NewButton("Push", func() { runAction("push", eng.Push) })
+	pushBtn.SetToolTip("Upload this PC’s save for this game to the cloud.")
+	watchBtn := ttwidget.NewButton("Start Watcher", nil)
+	watchBtn.SetToolTip("Background auto-sync: push after local saves settle (and only when the game isn’t running), and pull from the cloud on an interval.")
 	watchBtn.OnTapped = func() {
 		if !remoteConfigured(cfg) {
 			dialog.ShowInformation("Setup needed", "Set a remote destination first (Remote row on the left).", w)
@@ -524,21 +723,22 @@ func Run() error {
 		linkRemote()
 	}
 
-	gameRow := container.NewBorder(nil, nil, widget.NewLabel("Game"), refreshBtn, gameSelect)
-	actions := container.NewVBox(pullBtn, pushBtn, playBtn, watchBtn)
-	scaleRow := newUIScaleControl(&cfg, w, func(updated config.Config) {
-		cfg = updated
+	actions := container.NewVBox(pullBtn, pushBtn, watchBtn)
+	clearActivityBtn := ttwidget.NewButton("Clear Activity", func() {
+		mu.Lock()
+		defer mu.Unlock()
+		logRich.Segments = nil
+		logRich.Refresh()
 	})
+	clearActivityBtn.SetToolTip("Clear the activity log.")
 	rightTop := container.NewVBox(
-		gameRow,
-		widget.NewSeparator(),
 		statusLabel,
 		widget.NewSeparator(),
 		actions,
-		widget.NewSeparator(),
-		scaleRow,
 	)
-	right := container.NewBorder(rightTop, nil, nil, nil, container.NewPadded(container.NewVScroll(logView)))
+	rightBottom := container.NewPadded(clearActivityBtn)
+	rightInner := container.NewBorder(rightTop, rightBottom, nil, nil, container.NewPadded(logPane))
+	right := container.New(&shrinkFillLayout{}, rightInner)
 
 	split := container.NewHSplit(
 		container.NewPadded(left),
@@ -548,7 +748,7 @@ func Run() error {
 
 	refreshLeftRemote()
 	refreshLeftLocal()
-	w.SetContent(split)
+	w.SetContent(fynetooltip.AddWindowToolTipLayer(split, w.Canvas()))
 	refreshStatus()
 
 	appendLog("rclone: " + eng.Rclone.ResolvedPath())
@@ -599,6 +799,30 @@ func trunc(h string) string {
 	return h[:10]
 }
 
+// displayPath shortens long paths so Entry/Label MinSize does not force the window wide.
+func displayPath(s string) string {
+	const max = 48
+	if s == "" || len(s) <= max {
+		return s
+	}
+	return "…" + s[len(s)-(max-1):]
+}
+
+// shrinkFillLayout reports a small MinSize so parents (HSplit / window) can shrink,
+// while always giving children the full allocated size.
+type shrinkFillLayout struct{}
+
+func (shrinkFillLayout) MinSize(_ []fyne.CanvasObject) fyne.Size {
+	return fyne.NewSize(160, 120)
+}
+
+func (shrinkFillLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	for _, o := range objects {
+		o.Resize(size)
+		o.Move(fyne.NewPos(0, 0))
+	}
+}
+
 // contrastLogTheme paints disabled widgets with normal foreground so log text stays readable.
 type contrastLogTheme struct {
 	base fyne.Theme
@@ -623,13 +847,40 @@ func looksLikeSteamIDDir(name string) bool {
 	}
 	for _, r := range name {
 		if r < '0' || r > '9' {
-			// SteamID folders are often hex-ish like 011000011a0eed1a
 			if (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+func shortGameLabel(id string) string {
+	switch id {
+	case "ds2":
+		return "DS2 SotFS"
+	case "ds2-vanilla":
+		return "DS2"
+	case "ds3":
+		return "DS3"
+	default:
+		return id
+	}
+}
+
+func saveDirLooksLikeGame(saveDir string, g detect.Game) bool {
+	clean := filepath.Clean(saveDir)
+	// .../DarkSoulsIII/<steamid> or .../DarkSoulsII/<steamid>
+	base := filepath.Base(clean)
+	parent := filepath.Base(filepath.Dir(clean))
+	if strings.EqualFold(parent, g.FolderName) && looksLikeSteamIDDir(base) {
+		return true
+	}
+	// User may have selected the DarkSoulsIII parent itself
+	if strings.EqualFold(base, g.FolderName) {
+		return true
+	}
+	return false
 }
 
 func maxFloat32(vals ...float32) float32 {

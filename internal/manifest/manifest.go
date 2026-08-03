@@ -41,7 +41,10 @@ func HashDir(root string) (map[string]string, string, error) {
 		if lower == strings.ToLower(FileName) {
 			return nil
 		}
-		// Focus on save-related files; still include others in the slot folder.
+		// Only real save slots — ignore mod logs / notes that may live beside saves.
+		if !isSaveFile(lower) {
+			return nil
+		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
@@ -58,6 +61,37 @@ func HashDir(root string) (map[string]string, string, error) {
 		return nil, "", err
 	}
 	return files, aggregate(files), nil
+}
+
+// ContentAggregate hashes on-disk save files in root.
+// It never trusts a co-located manifest.json aggregate (which can go stale).
+func ContentAggregate(root string) (string, error) {
+	_, agg, err := HashDir(root)
+	return agg, err
+}
+
+func isSaveFile(lowerName string) bool {
+	return strings.HasSuffix(lowerName, ".sl2") || strings.HasSuffix(lowerName, ".sl2.bak")
+}
+
+// SyncHash is the aggregate used for conflict detection.
+// Prefer recomputing from Files with only save slots, so older state that
+// included README.md / notes does not false-conflict after HashDir tightened.
+func (m Manifest) SyncHash() string {
+	if len(m.Files) == 0 {
+		return m.Aggregate
+	}
+	filtered := map[string]string{}
+	for rel, sum := range m.Files {
+		base := strings.ToLower(filepath.Base(rel))
+		if isSaveFile(base) {
+			filtered[rel] = sum
+		}
+	}
+	if len(filtered) == 0 {
+		return m.Aggregate
+	}
+	return aggregate(filtered)
 }
 
 func Build(gameID, remoteKey, steamID, tool string, root string) (Manifest, error) {

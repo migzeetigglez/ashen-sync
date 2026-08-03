@@ -5,6 +5,7 @@ go 1.22
 require (
 	fyne.io/fyne/v2 v2.6.3
 	github.com/BurntSushi/toml v1.4.0
+	github.com/dweymouth/fyne-tooltip v0.4.0
 	github.com/fsnotify/fsnotify v1.9.0
 )
 

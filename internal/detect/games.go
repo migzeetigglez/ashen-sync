@@ -7,6 +7,7 @@ var Games = []Game{
 		Name:         "DARK SOULS II: Scholar of the First Sin",
 		AppID:        "335300",
 		FolderName:   "DarkSoulsII",
+		ExeName:      "DarkSoulsII.exe",
 		RemoteKey:    "dark-souls-ii-sotfs",
 		ProcessNames: []string{"DarkSoulsII", "DarkSoulsII.exe"},
 	},
@@ -15,6 +16,7 @@ var Games = []Game{
 		Name:         "DARK SOULS II",
 		AppID:        "236430",
 		FolderName:   "DarkSoulsII",
+		ExeName:      "DarkSoulsII.exe",
 		RemoteKey:    "dark-souls-ii",
 		ProcessNames: []string{"DarkSoulsII", "DarkSoulsII.exe"},
 	},
@@ -23,6 +25,7 @@ var Games = []Game{
 		Name:         "DARK SOULS III",
 		AppID:        "374320",
 		FolderName:   "DarkSoulsIII",
+		ExeName:      "DarkSoulsIII.exe",
 		RemoteKey:    "dark-souls-iii",
 		ProcessNames: []string{"DarkSoulsIII", "DarkSoulsIII.exe"},
 	},
@@ -33,6 +36,7 @@ type Game struct {
 	Name         string
 	AppID        string
 	FolderName   string // under AppData\Roaming
+	ExeName      string // Windows executable filename in the install tree
 	RemoteKey    string
 	ProcessNames []string
 }

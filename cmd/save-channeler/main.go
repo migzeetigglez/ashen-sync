@@ -303,8 +303,8 @@ func cmdWatch() error {
 		OnEvent: func(ev watch.Event) {
 			fmt.Printf("%s [%s] %s\n", ev.Time.Format(time.RFC3339), ev.Level, ev.Message)
 		},
-		OnConflict: func(c *syncer.ConflictError) {
-			fmt.Printf("CONFLICT: %s\nUse save-channeler pull/push --prefer local|remote\n", c.Error())
+		OnConflict: func(c *syncer.ConflictError, action string) {
+			fmt.Printf("CONFLICT during %s: %s\nUse save-channeler %s --prefer local|remote\n", action, c.Error(), action)
 		},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

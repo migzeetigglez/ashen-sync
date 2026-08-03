@@ -1,5 +1,7 @@
 # Save Channeler
 
+![Save Channeler GUI](assets/channeler-app.png)
+
 Open-source cloud saves for **DARK SOULS II** and **DARK SOULS III** on Steam — **Windows, Linux, and Steam Deck**.
 
 CLI binary: **`save-channeler`**.
@@ -132,6 +134,16 @@ Override a save path if auto-detect fails:
 ```toml
 [game_overrides]
 ds3 = "/full/path/to/DarkSoulsIII/7656119..."
+```
+
+### Mod log (optional, DS2 / DS2 SotFS / DS3 only)
+
+Place a `README.md` (or `MODS.md`) inside that game’s save folder next to the `.sl2` file. The GUI lists those mods under **Auto-detect** for the selected game only (DS2, Scholar of the First Sin, or DS3 — not other titles).
+
+```markdown
+# Mods
+
+- [Mod Name](https://www.nexusmods.com/darksouls3/mods/…)
 ```
 
 ## Save locations

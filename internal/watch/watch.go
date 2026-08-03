@@ -24,7 +24,8 @@ type Watcher struct {
 	QuietPeriod  time.Duration
 	PullInterval time.Duration
 	OnEvent      func(Event)
-	OnConflict   func(*syncer.ConflictError)
+	// OnConflict is called with action "push" or "pull" so the UI can resolve with the matching prefer rules.
+	OnConflict func(c *syncer.ConflictError, action string)
 
 	mu       sync.Mutex
 	pending  map[string]time.Time // gameID -> last change
@@ -195,7 +196,7 @@ func (w *Watcher) flushPending(ctx context.Context, watched map[string]detect.Sa
 			if c, ok := syncer.IsConflict(err); ok {
 				w.emit("warn", c.Error())
 				if w.OnConflict != nil {
-					w.OnConflict(c)
+					w.OnConflict(c, "push")
 				}
 				continue
 			}
@@ -227,7 +228,7 @@ func (w *Watcher) idlePull(ctx context.Context, watched map[string]detect.SaveLo
 			if c, ok := syncer.IsConflict(err); ok {
 				w.emit("warn", c.Error())
 				if w.OnConflict != nil {
-					w.OnConflict(c)
+					w.OnConflict(c, "pull")
 				}
 				continue
 			}

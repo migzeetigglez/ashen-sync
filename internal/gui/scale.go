@@ -13,6 +13,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
 	"github.com/migzeetigglez/ashen-sync/internal/config"
 )
@@ -101,8 +102,9 @@ func writeFyneScale(scale float32) error {
 
 // newUIScaleControl builds a labeled select that persists ui_scale and applies it live.
 func newUIScaleControl(cfg *config.Config, w fyne.Window, onSaved func(config.Config)) fyne.CanvasObject {
-	sel := widget.NewSelect(uiScaleLabels(), nil)
+	sel := ttwidget.NewSelect(uiScaleLabels(), nil)
 	sel.SetSelected(labelForScale(cfg.UIScaleOrDefault()))
+	sel.SetToolTip("Make the whole UI larger or smaller. You may need to reopen Save Channeler for it to fully apply.")
 	sel.OnChanged = func(label string) {
 		scale, ok := scaleForLabel(label)
 		if !ok {

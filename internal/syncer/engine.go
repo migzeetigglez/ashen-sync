@@ -135,7 +135,7 @@ func (e Engine) Status(ctx context.Context, gameID string) (Status, error) {
 	st.LocalHash = local.Aggregate
 
 	last, _ := e.loadLastSync(loc.Game.ID)
-	st.LastSync = last.Aggregate
+	st.LastSync = last.SyncHash()
 
 	tmp, err := os.MkdirTemp("", "ashen-remote-*")
 	if err != nil {
@@ -144,9 +144,19 @@ func (e Engine) Status(ctx context.Context, gameID string) (Status, error) {
 	defer os.RemoveAll(tmp)
 
 	remoteDir := e.remoteGameDir(loc)
+	// Probe with lsf first — missing remote dirs are normal on first push and
+	// must not dump rclone "directory not found" ERROR spam into the activity log.
+	listing, err := e.Rclone.Lsf(ctx, remoteDir)
+	if err != nil {
+		e.logf("remote check failed: %v", err)
+		return st, nil
+	}
+	if len(listing) == 0 {
+		e.logf("no cloud save yet for %s (first push will create it)", loc.Game.ID)
+		return st, nil
+	}
 	if err := e.Rclone.CopyFromRemote(ctx, remoteDir, tmp); err != nil {
-		// no remote yet
-		e.logf("remote not available or empty: %v", err)
+		e.logf("remote download for status failed: %v", err)
 		return st, nil
 	}
 	names, _ := os.ReadDir(tmp)
@@ -154,16 +164,13 @@ func (e Engine) Status(ctx context.Context, gameID string) (Status, error) {
 		return st, nil
 	}
 	st.HasRemote = true
-	remoteManPath := filepath.Join(tmp, manifest.FileName)
-	if rm, err := manifest.Read(remoteManPath); err == nil {
-		st.RemoteHash = rm.Aggregate
-	} else {
-		_, agg, err := manifest.HashDir(tmp)
-		if err != nil {
-			return st, err
-		}
-		st.RemoteHash = agg
+	// Always hash remote *content*. Trusting remote manifest.json.Aggregate caused
+	// false conflicts when the manifest went stale relative to DS30000.sl2.
+	agg, err := manifest.ContentAggregate(tmp)
+	if err != nil {
+		return st, err
 	}
+	st.RemoteHash = agg
 	st.InSync = st.LocalHash != "" && st.LocalHash == st.RemoteHash
 	return st, nil
 }
@@ -187,13 +194,13 @@ func (e Engine) Push(ctx context.Context, gameID string, prefer Prefer) error {
 	}
 	if st.HasRemote && st.RemoteHash != "" && st.RemoteHash != local.Aggregate {
 		last, _ := e.loadLastSync(loc.Game.ID)
-		if last.Aggregate != "" && local.Aggregate != last.Aggregate && st.RemoteHash != last.Aggregate {
+		if last.SyncHash() != "" && local.Aggregate != last.SyncHash() && st.RemoteHash != last.SyncHash() {
 			if prefer != PreferLocal {
 				return &ConflictError{
 					GameID:       loc.Game.ID,
 					LocalHash:    local.Aggregate,
 					RemoteHash:   st.RemoteHash,
-					LastSyncHash: last.Aggregate,
+					LastSyncHash: last.SyncHash(),
 				}
 			}
 		}
@@ -251,13 +258,9 @@ func (e Engine) Pull(ctx context.Context, gameID string, prefer Prefer) error {
 	}
 
 	var remoteHash string
-	if rm, err := manifest.Read(filepath.Join(tmp, manifest.FileName)); err == nil {
-		remoteHash = rm.Aggregate
-	} else {
-		_, remoteHash, err = manifest.HashDir(tmp)
-		if err != nil {
-			return err
-		}
+	remoteHash, err = manifest.ContentAggregate(tmp)
+	if err != nil {
+		return err
 	}
 
 	var localHash string
@@ -273,13 +276,13 @@ func (e Engine) Pull(ctx context.Context, gameID string, prefer Prefer) error {
 			return nil
 		}
 		last, _ := e.loadLastSync(loc.Game.ID)
-		if last.Aggregate != "" && localHash != last.Aggregate && remoteHash != last.Aggregate {
+		if last.SyncHash() != "" && localHash != last.SyncHash() && remoteHash != last.SyncHash() {
 			if prefer != PreferRemote {
 				return &ConflictError{
 					GameID:       loc.Game.ID,
 					LocalHash:    localHash,
 					RemoteHash:   remoteHash,
-					LastSyncHash: last.Aggregate,
+					LastSyncHash: last.SyncHash(),
 				}
 			}
 		}
