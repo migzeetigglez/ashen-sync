@@ -129,7 +129,7 @@ func RunWith(opts Options) error {
 	remotePathEntry.Disable()
 	remotePathView := container.NewThemeOverride(remotePathEntry, readableDisabledTheme{base: scTheme})
 	remoteBtn := ttwidget.NewButton("Set", nil)
-	remoteBtn.SetToolTip("Link Google Drive as the cloud sync destination, or change / disconnect the linked account. The path below updates per selected game.")
+	remoteBtn.SetToolTip("Choose a sync destination: Google Drive or Proton Drive (proton.me). Change disconnects or switches destinations. The path below updates per selected game.")
 
 	localPathEntry := widget.NewEntry()
 	localPathEntry.SetPlaceHolder("Select local save folder…")
@@ -773,7 +773,40 @@ func RunWith(opts Options) error {
 		refreshStatus()
 	}
 
-	linkRemote := func() {
+	finishRemoteSetup := func(newCfg config.Config) {
+		applyConfig(newCfg)
+		id := gameSelect.Selected
+		if id == "" {
+			id = "ds3"
+		}
+		if cfg.GameOverrides == nil || strings.TrimSpace(cfg.GameOverrides[id]) == "" {
+			showChooseGameDialog()
+		}
+		var msg string
+		switch newCfg.Remote {
+		case remoteProtonDrive:
+			folder := newCfg.RemotePath
+			if folder == "" {
+				folder = "save-channeler"
+			}
+			msg = fmt.Sprintf(
+				"Proton Drive is linked.\n\n"+
+					"Created folder “%s” in your Proton Drive (path: %s).\n\n"+
+					"Unlike Google Drive, Proton does not open a browser to approve access — "+
+					"sign-in used the email/password you entered here.\n\n"+
+					"If you don’t see the folder yet at drive.proton.me, refresh the page "+
+					"(or wait a moment); Proton’s web UI can lag behind rclone.",
+				folder, newCfg.RemoteRoot(),
+			)
+		case remoteGoogleDrive:
+			msg = "Google Drive is linked.\n\nSaves will sync to " + newCfg.RemoteRoot() + "."
+		default:
+			msg = "Saves will sync to " + newCfg.RemoteRoot() + "."
+		}
+		dialog.ShowInformation("Connected", msg, w)
+	}
+
+	linkGoogleDrive := func() {
 		pathEntry := widget.NewEntry()
 		pathEntry.SetText("save-channeler")
 		form := widget.NewForm(
@@ -800,56 +833,167 @@ func RunWith(opts Options) error {
 						dialog.ShowError(err, w)
 						return
 					}
-					applyConfig(newCfg)
-					id := gameSelect.Selected
-					if id == "" {
-						id = "ds3"
-					}
-					if cfg.GameOverrides == nil || strings.TrimSpace(cfg.GameOverrides[id]) == "" {
-						runAutoDetect(true)
-					}
-					dialog.ShowInformation("Connected", "Saves will sync to "+newCfg.RemoteRoot(), w)
+					finishRemoteSetup(newCfg)
 				})
 			}()
 		}, w)
 	}
 
-	changeRemote := func() {
-		msg := "Disconnect Google Drive and clear the sync destination?\n\n" +
-			"Current: " + cfg.RemoteRoot() + "\n\n" +
-			"• Signs out the linked Google account from Save Channeler\n" +
-			"• Cloud save files are not deleted\n" +
-			"• Next “Set” will open Google so you can pick another account"
-		dialog.ShowConfirm("Change remote", msg, func(ok bool) {
+	linkProtonDrive := func() {
+		hint := widget.NewLabel(
+			"Proton Drive works differently from Google Drive:\n\n"+
+				"• No browser window opens — you sign in with email/password (and 2FA) in this form.\n"+
+				"• rclone then creates your sync folder in Proton Drive automatically.\n"+
+				"• Log into drive.proton.me in a browser at least once beforehand so encryption keys exist.\n"+
+				"• Credentials stay in your local rclone config only.",
+		)
+		hint.Wrapping = fyne.TextWrapWord
+		userEntry := widget.NewEntry()
+		userEntry.SetPlaceHolder("you@proton.me")
+		passEntry := widget.NewPasswordEntry()
+		twoFAEntry := widget.NewEntry()
+		twoFAEntry.SetPlaceHolder("optional 2FA code")
+		folderEntry := widget.NewEntry()
+		folderEntry.SetText("save-channeler")
+		form := container.NewVBox(
+			hint,
+			widget.NewForm(
+				widget.NewFormItem("Email", userEntry),
+				widget.NewFormItem("Password", passEntry),
+				widget.NewFormItem("2FA code", twoFAEntry),
+				widget.NewFormItem("Folder in Drive", folderEntry),
+			),
+		)
+		d := dialog.NewCustomConfirm("Link Proton Drive", "Connect", "Cancel", form, func(ok bool) {
 			if !ok {
 				return
 			}
-			if watcher.Running() {
-				watcher.Stop()
-				watchBtn.SetText("Start Watcher")
+			folder := strings.TrimSpace(folderEntry.Text)
+			if folder == "" {
+				folder = "save-channeler"
 			}
 			remoteBtn.Disable()
-			appendLog("Disconnecting Google Drive…")
-			prog := dialog.NewProgressInfinite("Resetting", "Disconnecting Google Drive…", w)
+			appendLog("Starting Proton Drive setup…")
+			prog := dialog.NewProgressInfinite(
+				"Linking Proton Drive",
+				"Connecting with your Proton credentials (no browser window)…",
+				w,
+			)
 			prog.Show()
 			go func() {
-				derr := disconnectGoogleDrive(context.Background(), eng.Rclone.ResolvedPath(), appendLog)
+				newCfg, err := setupProtonDrive(
+					context.Background(),
+					eng.Rclone.ResolvedPath(),
+					userEntry.Text,
+					passEntry.Text,
+					twoFAEntry.Text,
+					folder,
+					appendLog,
+				)
 				fyne.Do(func() {
 					prog.Hide()
 					remoteBtn.Enable()
-					if derr != nil {
-						dialog.ShowError(derr, w)
-						return
-					}
-					if err := cfg.ClearRemote(); err != nil {
+					if err != nil {
 						dialog.ShowError(err, w)
 						return
 					}
-					appendLog("ready — use Set to link Google Drive")
-					applyConfig(cfg)
+					finishRemoteSetup(newCfg)
 				})
 			}()
 		}, w)
+		d.Resize(fyne.NewSize(580, 480))
+		d.Show()
+	}
+
+	clearRemoteDestination := func() {
+		if watcher.Running() {
+			watcher.Stop()
+			watchBtn.SetText("Start Watcher")
+		}
+		remoteBtn.Disable()
+		appendLog("Disconnecting sync destination…")
+		prog := dialog.NewProgressInfinite("Resetting", "Clearing sync destination…", w)
+		prog.Show()
+		go func() {
+			derr := disconnectConfiguredRemote(context.Background(), eng.Rclone.ResolvedPath(), cfg, appendLog)
+			fyne.Do(func() {
+				prog.Hide()
+				remoteBtn.Enable()
+				if derr != nil {
+					dialog.ShowError(derr, w)
+					return
+				}
+				if err := cfg.ClearRemote(); err != nil {
+					dialog.ShowError(err, w)
+					return
+				}
+				appendLog("ready — use Set to choose Google Drive or Proton Drive")
+				applyConfig(cfg)
+			})
+		}()
+	}
+
+	showRemoteDestinationPicker := func(title string) {
+		body := widget.NewLabel(
+			"Choose where Save Channeler stores cloud copies of your saves.\n\n" +
+				"• Google Drive — Google account via rclone\n" +
+				"• Proton Drive — privacy-focused cloud at proton.me via rclone",
+		)
+		body.Wrapping = fyne.TextWrapWord
+		var d dialog.Dialog
+		gdriveBtn := ttwidget.NewButton("Google Drive", func() {
+			if d != nil {
+				d.Hide()
+			}
+			linkGoogleDrive()
+		})
+		gdriveBtn.Importance = widget.HighImportance
+		protonBtn := ttwidget.NewButton("Proton Drive", func() {
+			if d != nil {
+				d.Hide()
+			}
+			linkProtonDrive()
+		})
+		protonBtn.Importance = widget.HighImportance
+		content := container.NewVBox(body, gdriveBtn, protonBtn)
+		d = dialog.NewCustom(title, "Cancel", content, w)
+		d.Resize(fyne.NewSize(520, 340))
+		d.Show()
+	}
+
+	changeRemote := func() {
+		body := widget.NewLabel(fmt.Sprintf(
+			"Current destination (%s):\n%s\n\nSwitch to another destination, or disconnect.",
+			remoteKindLabel(cfg), cfg.RemoteRoot(),
+		))
+		body.Wrapping = fyne.TextWrapWord
+		var d dialog.Dialog
+		switchBtn := ttwidget.NewButton("Switch destination…", func() {
+			if d != nil {
+				d.Hide()
+			}
+			showRemoteDestinationPicker("Switch sync destination")
+		})
+		switchBtn.Importance = widget.HighImportance
+		disconnectBtn := ttwidget.NewButton("Disconnect", func() {
+			if d != nil {
+				d.Hide()
+			}
+			dialog.ShowConfirm(
+				"Disconnect remote?",
+				"Clear the sync destination?\n\nFiles already in Google Drive or Proton Drive are not deleted.",
+				func(ok bool) {
+					if ok {
+						clearRemoteDestination()
+					}
+				},
+				w,
+			)
+		})
+		content := container.NewVBox(body, switchBtn, disconnectBtn)
+		d = dialog.NewCustom("Change remote", "Cancel", content, w)
+		d.Resize(fyne.NewSize(480, 280))
+		d.Show()
 	}
 
 	remoteBtn.OnTapped = func() {
@@ -857,7 +1001,7 @@ func RunWith(opts Options) error {
 			changeRemote()
 			return
 		}
-		linkRemote()
+		showRemoteDestinationPicker("Set sync destination")
 	}
 
 	actions := container.NewGridWithColumns(2,

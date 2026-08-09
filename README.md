@@ -56,8 +56,8 @@ Open **Save Channeler** from the app menu (or `save-channeler gui`), then **Remo
 
 | Step | Why |
 |---|---|
-| Link remote (Google Drive) | Your cloud credentials — only you can authorize |
-| Confirm local save folder | Auto-detect usually finds it; Browse if it does not |
+| Link remote | **Google Drive** or **Proton Drive** (proton.me) via rclone |
+| Confirm local save folder | Choose game, then Auto-detect / Browse |
 
 ### Updates (Windows / Linux)
 
