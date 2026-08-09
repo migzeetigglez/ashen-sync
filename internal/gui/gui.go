@@ -272,8 +272,23 @@ func RunWith(opts Options) error {
 	validateSavesBtn.SetToolTip("Re-check whether the local and cloud saves match for the selected game.")
 	pillRow := container.NewGridWithColumns(2, autoDetectBtn, validateSavesBtn)
 
+	supportedGamesBlurb := func() string {
+		var b strings.Builder
+		b.WriteString("Save Channeler supports these Steam games:\n")
+		for _, name := range detect.SupportedNames() {
+			b.WriteString("• ")
+			b.WriteString(name)
+			b.WriteString("\n")
+		}
+		b.WriteString("\nSaves are created on Windows, Linux, or Steam Deck after you launch the game once. Use Browse to pick a folder, or sync from the cloud after linking Drive.")
+		return b.String()
+	}
+
+	var runAutoDetect func(quietSkip bool)
+	var showChooseGameDialog func()
+
 	// runAutoDetect finds/validates a save folder. quietSkip hides the "already set" dialog (first-run).
-	runAutoDetect := func(quietSkip bool) {
+	runAutoDetect = func(quietSkip bool) {
 		id := gameSelect.Selected
 		if id == "" {
 			id = "ds3"
@@ -286,11 +301,29 @@ func RunWith(opts Options) error {
 				autoDetectBtn.Enable()
 				if err != nil {
 					appendLog("auto-detect failed: " + err.Error())
-					dialog.ShowInformation(
+					gName := id
+					if g, ok := detect.ByID(id); ok {
+						gName = g.Name
+					}
+					msg := fmt.Sprintf(
+						"No %s save files found on this machine.\n\n%s",
+						gName, supportedGamesBlurb(),
+					)
+					noSaveLbl := widget.NewLabel(msg)
+					noSaveLbl.Wrapping = fyne.TextWrapWord
+					d := dialog.NewCustomConfirm(
 						"No save found",
-						err.Error()+"\n\nLaunch the game once to create a save, or use Browse to pick the folder manually.",
+						"Choose game",
+						"OK",
+						noSaveLbl,
+						func(choose bool) {
+							if choose {
+								showChooseGameDialog()
+							}
+						},
 						w,
 					)
+					d.Show()
 					return
 				}
 				if err := detect.ValidateSaveDir(loc.Path); err != nil {
@@ -343,6 +376,37 @@ func RunWith(opts Options) error {
 	}
 
 	autoDetectBtn.OnTapped = func() { runAutoDetect(false) }
+
+	showChooseGameDialog = func() {
+		titleLbl := widget.NewLabelWithStyle("Open Save Channeler for…", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		body := widget.NewLabel(
+			"Pick which game to configure. Save Channeler will select it and look for a local save folder.\n\n" +
+				supportedGamesBlurb(),
+		)
+		body.Wrapping = fyne.TextWrapWord
+
+		buttons := container.NewVBox()
+		var d dialog.Dialog
+		for _, g := range detect.Games {
+			g := g
+			label := shortGameLabel(g.ID) + " — " + g.Name
+			btn := ttwidget.NewButton(label, func() {
+				if d != nil {
+					d.Hide()
+				}
+				gameSelect.SetSelected(g.ID)
+				appendLog("selected game " + g.ID)
+				runAutoDetect(false)
+			})
+			btn.Importance = widget.HighImportance
+			btn.SetToolTip("Configure saves for " + g.Name)
+			buttons.Add(btn)
+		}
+		content := container.NewVBox(titleLbl, body, buttons)
+		d = dialog.NewCustom("Choose a game", "Not now", content, w)
+		d.Resize(fyne.NewSize(520, 420))
+		d.Show()
+	}
 
 	iconImg := canvas.NewImageFromResource(icon)
 	iconImg.FillMode = canvas.ImageFillContain
@@ -427,11 +491,15 @@ func RunWith(opts Options) error {
 	})
 
 	var pendingUpdate update.Info
-	updateBtn := ttwidget.NewButton("Update available", nil)
-	updateBtn.Importance = widget.HighImportance
-	updateBtn.Hide()
-	updateBtn.SetToolTip("A newer Save Channeler release is available.")
-	updateBtn.OnTapped = func() {
+	updateBanner := newUpdateBannerHost()
+	var rootBox *fyne.Container
+	refreshRoot := func() {
+		if rootBox != nil {
+			rootBox.Refresh()
+		}
+		w.Content().Refresh()
+	}
+	runInstallUpdate := func() {
 		info := pendingUpdate
 		if !info.Available {
 			return
@@ -461,7 +529,6 @@ func RunWith(opts Options) error {
 			if !ok {
 				return
 			}
-			updateBtn.Disable()
 			prog := dialog.NewProgressInfinite("Updating", "Downloading "+info.AssetName+"…", w)
 			prog.Show()
 			go func() {
@@ -469,7 +536,6 @@ func RunWith(opts Options) error {
 				fyne.Do(func() {
 					prog.Hide()
 					if err != nil {
-						updateBtn.Enable()
 						dialog.ShowError(err, w)
 						appendLog("update failed: " + err.Error())
 						return
@@ -481,10 +547,9 @@ func RunWith(opts Options) error {
 			}()
 		}, w)
 	}
-	topBar := container.NewBorder(nil, nil, nil, updateBtn, scaleRow)
 
 	leftContent := container.NewVBox(
-		topBar,
+		scaleRow,
 		goldHairline(),
 		container.NewCenter(title),
 		purpose,
@@ -824,7 +889,9 @@ func RunWith(opts Options) error {
 	split.SetOffset(0.50) // equal columns by default
 
 	bg := canvas.NewRectangle(ds3Bg)
-	root := container.NewStack(bg, container.NewPadded(split))
+	mainPane := container.NewPadded(split)
+	rootBox = container.NewBorder(updateBanner, nil, nil, nil, mainPane)
+	root := container.NewStack(bg, rootBox)
 
 	refreshLeftRemote()
 	refreshLeftLocal()
@@ -862,13 +929,14 @@ func RunWith(opts Options) error {
 					dialog.ShowInformation(
 						"Welcome to Save Channeler",
 						"Set your remote cloud folder first (Remote → Set).\n\n"+
-							"After that, Save Channeler can auto-detect your Dark Souls save folder.",
+							"After that, choose DS2 or DS3 and Save Channeler can detect your save folder.",
 						w,
 					)
 					return
 				}
 				if localUnset() {
-					runAutoDetect(true)
+					// Let the user pick DS2 / DS3 instead of silently defaulting to one game.
+					showChooseGameDialog()
 				}
 			})
 		}()
@@ -882,8 +950,11 @@ func RunWith(opts Options) error {
 			}
 			fyne.Do(func() {
 				pendingUpdate = info
-				updateBtn.SetText("Update " + info.Version)
-				updateBtn.Show()
+				banner := buildUpdateBanner(info.Version, runInstallUpdate, func() {
+					updateBanner.dismissAnimated(refreshRoot)
+				})
+				updateBanner.showBanner(banner)
+				refreshRoot()
 				appendLog("update available: " + info.Tag)
 			})
 		}()

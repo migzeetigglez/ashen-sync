@@ -56,3 +56,12 @@ func ByID(id string) (Game, bool) {
 	}
 	return Game{}, false
 }
+
+// SupportedNames returns display names for every game Save Channeler syncs.
+func SupportedNames() []string {
+	out := make([]string, 0, len(Games))
+	for _, g := range Games {
+		out = append(out, g.Name)
+	}
+	return out
+}
