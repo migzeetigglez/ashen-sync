@@ -11,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -61,13 +61,14 @@ func RunWith(opts Options) error {
 		return err
 	}
 
-	// MultiLine Entry (disabled) so users can highlight and copy; RichText is not selectable in Fyne.
-	logEntry := widget.NewMultiLineEntry()
-	logEntry.Wrapping = fyne.TextWrapBreak
-	logEntry.TextStyle = fyne.TextStyle{Monospace: true}
-	logEntry.Disable()
-	// Don't let long lines dictate window/split MinSize — fill allocated space only.
-	logThemed := container.NewThemeOverride(logEntry, activityLogTheme{base: scTheme})
+	// Selectable Label is much cheaper than a disabled MultiLineEntry for a growing log,
+	// and still supports highlight + copy (Fyne 2.6+).
+	logLabel := widget.NewLabel("")
+	logLabel.Wrapping = fyne.TextWrapBreak
+	logLabel.TextStyle = fyne.TextStyle{Monospace: true}
+	logLabel.Selectable = true
+	logScroll := container.NewVScroll(logLabel)
+	logThemed := container.NewThemeOverride(logScroll, activityLogTheme{base: scTheme})
 	logPane := container.New(&shrinkFillLayout{}, logThemed)
 
 	const (
@@ -75,21 +76,25 @@ func RunWith(opts Options) error {
 		logToneValidate // Validate Saves — marked distinctly in the activity log
 	)
 
-	var mu sync.Mutex
-	appendLogTone := func(line string, tone int) {
+	var actLog *activityLog
+	actLog = newActivityLog(func(text string, lineCount int, gen uint64) {
 		fyne.Do(func() {
-			mu.Lock()
-			defer mu.Unlock()
-			prefix := ""
-			if tone == logToneValidate {
-				prefix = "◆ "
+			if actLog.currentGen() != gen {
+				return
 			}
-			logEntry.Append(time.Now().Format("15:04:05") + " " + prefix + line + "\n")
-			// Keep the newest lines in view.
-			logEntry.CursorRow = strings.Count(logEntry.Text, "\n")
-			logEntry.CursorColumn = 0
-			logEntry.Refresh()
+			t0 := time.Now()
+			logLabel.SetText(text)
+			logScroll.ScrollToBottom()
+			_ = lineCount
+			uiTrace("activity_log.setText", t0)
 		})
+	})
+	appendLogTone := func(line string, tone int) {
+		prefix := ""
+		if tone == logToneValidate {
+			prefix = "◆ "
+		}
+		actLog.appendLine(time.Now().Format("15:04:05") + " " + prefix + line + "\n")
 	}
 	appendLog := func(line string) {
 		appendLogTone(line, logToneNormal)
@@ -99,18 +104,20 @@ func RunWith(opts Options) error {
 	var applyConfig func(config.Config)
 
 	// --- Right column controls needed early for local-path refresh ---
-	gameSelect := ttwidget.NewSelect([]string{"ds2", "ds3", "ds2-vanilla"}, nil)
-	gameSelect.SetSelected("ds3")
+	gameSelect := ttwidget.NewSelect(detect.SelectLabels(), nil)
+	gameSelect.SetSelected(detect.SelectLabelForID("ds3"))
 	gameSelect.SetToolTip("Which game’s saves to sync and show mods for.")
+	selectedGameID := func() string {
+		id := detect.IDFromSelectLabel(gameSelect.Selected)
+		if id == "" {
+			return "ds3"
+		}
+		return id
+	}
 	statusLabel := widget.NewLabel("Status: —")
 	statusLabel.Wrapping = fyne.TextWrapWord
 
 	// --- Left column ---
-	title := canvas.NewText("SAVE CHANNELER", ds3Gold)
-	title.TextStyle = fyne.TextStyle{Bold: true}
-	title.FontSource = fontCinzelBold()
-	title.TextSize = 28
-	title.Alignment = fyne.TextAlignCenter
 	purpose := widget.NewLabel("Sync Dark Souls II & III saves across your PCs with rclone.")
 	purpose.Alignment = fyne.TextAlignCenter
 	purpose.Wrapping = fyne.TextWrapWord
@@ -143,55 +150,93 @@ func RunWith(opts Options) error {
 		widget.NewButton("Set", nil).MinSize().Width,
 	)
 
+	var (
+		remoteRefreshGen atomic.Uint64
+		localRefreshGen  atomic.Uint64
+		modsRefreshGen   atomic.Uint64
+	)
+	snapshotOverrides := func() map[string]string {
+		if cfg.GameOverrides == nil {
+			return nil
+		}
+		out := make(map[string]string, len(cfg.GameOverrides))
+		for k, v := range cfg.GameOverrides {
+			out[k] = v
+		}
+		return out
+	}
+
 	refreshLeftRemote := func() {
+		t0 := time.Now()
 		if !remoteConfigured(cfg) {
 			remotePathEntry.SetText("")
 			remotePathEntry.SetPlaceHolder("Select remote save folder…")
 			remoteBtn.SetText("Set")
+			uiTrace("refreshLeftRemote.unconfigured", t0)
 			return
 		}
 		remoteBtn.SetText("Change")
-		id := gameSelect.Selected
-		if id == "" {
-			id = "ds3"
-		}
-		// Per-game cloud path under the Drive root (same root for all games).
-		var full string
-		if loc, err := detect.FindGame(id, cfg.GameOverrides); err == nil && loc.SteamID != "" {
-			full = fmt.Sprintf("%s/%s/%s", cfg.RemoteRoot(), loc.Game.RemoteKey, loc.SteamID)
-		} else if g, ok := detect.ByID(id); ok {
-			full = fmt.Sprintf("%s/%s/…", cfg.RemoteRoot(), g.RemoteKey)
-		} else {
-			full = cfg.RemoteRoot()
-		}
-		remotePathEntry.SetText(displayPath(full))
+		id := selectedGameID()
+		overrides := snapshotOverrides()
+		remoteRoot := cfg.RemoteRoot()
+		gen := remoteRefreshGen.Add(1)
+		go func() {
+			tDisk := time.Now()
+			var full string
+			if loc, err := detect.FindGame(id, overrides); err == nil && loc.SteamID != "" {
+				full = fmt.Sprintf("%s/%s/%s", remoteRoot, loc.Game.RemoteKey, loc.SteamID)
+			} else if g, ok := detect.ByID(id); ok {
+				full = fmt.Sprintf("%s/%s/…", remoteRoot, g.RemoteKey)
+			} else {
+				full = remoteRoot
+			}
+			uiTrace("refreshLeftRemote.disk", tDisk)
+			fyne.Do(func() {
+				if remoteRefreshGen.Load() != gen {
+					return
+				}
+				remotePathEntry.SetText(displayPath(full))
+				uiTrace("refreshLeftRemote.total", t0)
+			})
+		}()
 	}
 
 	var refreshModsList func(gameID, saveDir string)
 
 	refreshLeftLocal := func() {
-		id := gameSelect.Selected
-		if id == "" {
-			id = "ds3"
+		t0 := time.Now()
+		id := selectedGameID()
+		overrides := snapshotOverrides()
+		overridePath := ""
+		if overrides != nil {
+			overridePath = overrides[id]
 		}
-		path := ""
-		if cfg.GameOverrides != nil {
-			path = cfg.GameOverrides[id]
-		}
-		if path == "" {
-			if loc, err := detect.FindGame(id, cfg.GameOverrides); err == nil && loc.Exists {
-				path = loc.Path
+		gen := localRefreshGen.Add(1)
+		go func() {
+			tDisk := time.Now()
+			path := overridePath
+			if path == "" {
+				if loc, err := detect.FindGame(id, overrides); err == nil && loc.Exists {
+					path = loc.Path
+				}
 			}
-		}
-		if path == "" {
-			localPathEntry.SetText("")
-			localPathEntry.SetPlaceHolder("Select local save folder…")
-			localBtn.SetText("Browse")
-		} else {
-			localPathEntry.SetText(displayPath(path))
-			localBtn.SetText("Change")
-		}
-		refreshModsList(id, path)
+			uiTrace("refreshLeftLocal.disk", tDisk)
+			fyne.Do(func() {
+				if localRefreshGen.Load() != gen {
+					return
+				}
+				if path == "" {
+					localPathEntry.SetText("")
+					localPathEntry.SetPlaceHolder("Select local save folder…")
+					localBtn.SetText("Browse")
+				} else {
+					localPathEntry.SetText(displayPath(path))
+					localBtn.SetText("Change")
+				}
+				refreshModsList(id, path)
+				uiTrace("refreshLeftLocal.total", t0)
+			})
+		}()
 	}
 
 	localBtn.OnTapped = func() {
@@ -221,10 +266,7 @@ func RunWith(opts Options) error {
 					}
 				}
 			}
-			id := gameSelect.Selected
-			if id == "" {
-				id = "ds3"
-			}
+			id := selectedGameID()
 			if cfg.GameOverrides == nil {
 				cfg.GameOverrides = map[string]string{}
 			}
@@ -282,10 +324,7 @@ func RunWith(opts Options) error {
 
 	// runAutoDetect finds/validates a save folder. quietSkip hides the "already set" dialog (first-run).
 	runAutoDetect = func(quietSkip bool) {
-		id := gameSelect.Selected
-		if id == "" {
-			id = "ds3"
-		}
+		id := selectedGameID()
 		autoDetectBtn.Disable()
 		appendLog("auto-detecting " + id + "…")
 		go func() {
@@ -382,12 +421,11 @@ func RunWith(opts Options) error {
 		var d dialog.Dialog
 		for _, g := range detect.Games {
 			g := g
-			label := shortGameLabel(g.ID) + " — " + g.Name
-			btn := ttwidget.NewButton(label, func() {
+			btn := ttwidget.NewButton(g.Name, func() {
 				if d != nil {
 					d.Hide()
 				}
-				gameSelect.SetSelected(g.ID)
+				gameSelect.SetSelected(g.SupportListName())
 				appendLog("selected game " + g.ID)
 				runAutoDetect(false)
 			})
@@ -401,9 +439,9 @@ func RunWith(opts Options) error {
 		d.Show()
 	}
 
-	iconImg := canvas.NewImageFromResource(icon)
-	iconImg.FillMode = canvas.ImageFillContain
-	iconImg.SetMinSize(fyne.NewSize(160, 160))
+	brandImg := canvas.NewImageFromResource(brandStackResource())
+	brandImg.FillMode = canvas.ImageFillContain
+	brandImg.SetMinSize(fyne.NewSize(320, 320))
 
 	autoDetectGap := canvas.NewRectangle(color.Transparent)
 	autoDetectGap.SetMinSize(fyne.NewSize(1, 12))
@@ -430,53 +468,72 @@ func RunWith(opts Options) error {
 	}
 
 	refreshModsList = func(gameID, saveDir string) {
-		modsListBox.Objects = nil
+		t0 := time.Now()
 		g, ok := detect.ByID(gameID)
 		if !ok {
+			modsListBox.Objects = nil
 			setModsHeading("MODS")
 			modsEmpty.SetText("Mods are only tracked for DS2, DS2 SotFS, and DS3.")
 			modsEmpty.Show()
 			refreshModsUI()
+			uiTrace("refreshModsList.unknown", t0)
 			return
 		}
 		label := shortGameLabel(g.ID)
-		setModsHeading("MODS (" + label + ")")
-
-		var logEntries []mods.Entry
-		if saveDir != "" && saveDirLooksLikeGame(saveDir, g) {
-			_, entries, err := mods.Load(saveDir)
-			if err != nil {
-				modsEmpty.SetText("Could not read mod log: " + err.Error())
-				modsEmpty.Show()
-				refreshModsUI()
-				return
-			}
-			logEntries = entries
-		}
-
-		exeDir := detect.FindExeDir(g)
-		autoEntries := mods.DetectInstall(g.ID, exeDir)
-		entries := mods.Merge(autoEntries, logEntries)
-
-		if len(entries) == 0 {
-			modsEmpty.SetText("No mods detected for this " + label + " install.")
-			modsEmpty.Show()
-			refreshModsUI()
-			return
-		}
-		modsEmpty.Hide()
-		for _, e := range entries {
-			e := e
-			if e.URL != "" {
-				u, perr := url.Parse(e.URL)
-				if perr == nil && u.Scheme != "" {
-					modsListBox.Add(widget.NewHyperlink(e.Name, u))
-					continue
+		gen := modsRefreshGen.Add(1)
+		go func() {
+			tDisk := time.Now()
+			var logEntries []mods.Entry
+			var loadErr error
+			if saveDir != "" && saveDirLooksLikeGame(saveDir, g) {
+				_, entries, err := mods.Load(saveDir)
+				if err != nil {
+					loadErr = err
+				} else {
+					logEntries = entries
 				}
 			}
-			modsListBox.Add(widget.NewLabel("• " + e.Name))
-		}
-		refreshModsUI()
+			exeDir := detect.FindExeDir(g)
+			autoEntries := mods.DetectInstall(g.ID, exeDir)
+			entries := mods.Merge(autoEntries, logEntries)
+			uiTrace("refreshModsList.disk", tDisk)
+
+			fyne.Do(func() {
+				if modsRefreshGen.Load() != gen {
+					return
+				}
+				modsListBox.Objects = nil
+				setModsHeading("MODS (" + label + ")")
+				if loadErr != nil {
+					modsEmpty.SetText("Could not read mod log: " + loadErr.Error())
+					modsEmpty.Show()
+					refreshModsUI()
+					uiTrace("refreshModsList.total", t0)
+					return
+				}
+				if len(entries) == 0 {
+					modsEmpty.SetText("No mods detected for this " + label + " install.")
+					modsEmpty.Show()
+					refreshModsUI()
+					uiTrace("refreshModsList.total", t0)
+					return
+				}
+				modsEmpty.Hide()
+				for _, e := range entries {
+					e := e
+					if e.URL != "" {
+						u, perr := url.Parse(e.URL)
+						if perr == nil && u.Scheme != "" {
+							modsListBox.Add(widget.NewHyperlink(e.Name, u))
+							continue
+						}
+					}
+					modsListBox.Add(widget.NewLabel("• " + e.Name))
+				}
+				refreshModsUI()
+				uiTrace("refreshModsList.total", t0)
+			})
+		}()
 	}
 
 	scaleRow := newUIScaleControl(&cfg, w, func(updated config.Config) {
@@ -486,11 +543,22 @@ func RunWith(opts Options) error {
 	var pendingUpdate update.Info
 	updateBanner := newUpdateBannerHost()
 	var rootBox *fyne.Container
-	refreshRoot := func() {
+	// Light: re-layout the border when the banner MinSize changes (animation frames).
+	refreshRootLayout := func() {
+		t0 := time.Now()
+		if rootBox != nil {
+			rootBox.Refresh()
+		}
+		uiTrace("refreshRoot.layout", t0)
+	}
+	// Full: one-shot after banner show/dismiss settles.
+	refreshRootFull := func() {
+		t0 := time.Now()
 		if rootBox != nil {
 			rootBox.Refresh()
 		}
 		w.Content().Refresh()
+		uiTrace("refreshRoot.full", t0)
 	}
 	runInstallUpdate := func() {
 		info := pendingUpdate
@@ -541,24 +609,30 @@ func RunWith(opts Options) error {
 		}, w)
 	}
 
-	leftContent := container.NewVBox(
-		scaleRow,
-		goldHairline(),
-		container.NewCenter(title),
-		purpose,
-		container.NewCenter(iconImg),
-		goldHairline(),
+	// Cap control width so fields/buttons don’t stretch edge-to-edge in a wide panel.
+	const leftControlsMaxW float32 = 400
+	formBlock := container.NewVBox(
 		gameRow,
 		remoteRow,
 		localRow,
 		autoDetectGap,
 		pillRow,
-		goldHairline(),
-		modsSection,
 	)
-	// Entire left column scrolls vertically (no nested scroller inside Mods).
-	leftScroll := container.NewVScroll(leftContent)
-	leftInner := container.New(&shrinkFillLayout{}, leftScroll)
+	leftHeader := container.NewVBox(
+		maxWidthCenter(leftControlsMaxW, scaleRow),
+		goldHairline(),
+	)
+	leftScrollBody := container.NewVBox(
+		container.NewCenter(brandImg),
+		maxWidthCenter(leftControlsMaxW, purpose),
+		goldHairline(),
+		maxWidthCenter(leftControlsMaxW, formBlock),
+		goldHairline(),
+		maxWidthCenter(leftControlsMaxW, modsSection),
+	)
+	// UI Scale stays pinned; brand + controls + mods scroll beneath it.
+	leftScroll := container.NewVScroll(leftScrollBody)
+	leftInner := container.NewBorder(leftHeader, nil, nil, nil, leftScroll)
 	left := container.New(&shrinkFillLayout{}, framedPanel("", leftInner))
 
 	var refreshStatus func()
@@ -621,7 +695,7 @@ func RunWith(opts Options) error {
 			fyne.Do(func() { statusLabel.SetText("Status: set a remote destination to get started") })
 			return
 		}
-		id := gameSelect.Selected
+		id := selectedGameID()
 		go func() {
 			st, err := eng.Status(context.Background(), id)
 			fyne.Do(func() {
@@ -641,10 +715,7 @@ func RunWith(opts Options) error {
 		}()
 	}
 	validateSavesBtn.OnTapped = func() {
-		id := gameSelect.Selected
-		if id == "" {
-			id = "ds3"
-		}
+		id := selectedGameID()
 		if !remoteConfigured(cfg) {
 			appendLogTone("Validate Saves: set a remote destination first", logToneValidate)
 			statusLabel.SetText("Status: set a remote destination to get started")
@@ -691,9 +762,11 @@ func RunWith(opts Options) error {
 		}()
 	}
 	gameSelect.OnChanged = func(string) {
+		t0 := time.Now()
 		refreshLeftRemote()
 		refreshLeftLocal()
 		refreshStatus()
+		uiTrace("gameSelect.OnChanged", t0)
 	}
 
 	runAction := func(name string, fn func(context.Context, string, syncer.Prefer) error) {
@@ -701,7 +774,7 @@ func RunWith(opts Options) error {
 			dialog.ShowInformation("Setup needed", "Set a remote destination first (Remote row on the left).", w)
 			return
 		}
-		id := gameSelect.Selected
+		id := selectedGameID()
 		go func() {
 			appendLog(name + " " + id + "…")
 			err := fn(context.Background(), id, syncer.PreferAbort)
@@ -738,12 +811,21 @@ func RunWith(opts Options) error {
 			appendLog("watcher stopped")
 			return
 		}
-		if err := watcher.Start(context.Background()); err != nil {
-			dialog.ShowError(err, w)
-			return
-		}
-		watchBtn.SetText("Stop Watcher")
-		appendLog("watcher started")
+		watchBtn.Disable()
+		go func() {
+			t0 := time.Now()
+			err := watcher.Start(context.Background())
+			uiTrace("watcher.Start", t0)
+			fyne.Do(func() {
+				watchBtn.Enable()
+				if err != nil {
+					dialog.ShowError(err, w)
+					return
+				}
+				watchBtn.SetText("Stop Watcher")
+				appendLog("watcher started")
+			})
+		}()
 	}
 	playBtn := ttwidget.NewButton("Play", func() { runAction("play", eng.Play) })
 	playBtn.Importance = widget.HighImportance
@@ -768,10 +850,7 @@ func RunWith(opts Options) error {
 
 	finishRemoteSetup := func(newCfg config.Config) {
 		applyConfig(newCfg)
-		id := gameSelect.Selected
-		if id == "" {
-			id = "ds3"
-		}
+		id := selectedGameID()
 		if cfg.GameOverrides == nil || strings.TrimSpace(cfg.GameOverrides[id]) == "" {
 			showChooseGameDialog()
 		}
@@ -1002,9 +1081,7 @@ func RunWith(opts Options) error {
 		watchBtn, playBtn,
 	)
 	clearActivityBtn := ttwidget.NewButton("Clear Activity", func() {
-		mu.Lock()
-		defer mu.Unlock()
-		logEntry.SetText("")
+		actLog.clear()
 	})
 	clearActivityBtn.SetToolTip("Clear the activity log. Select text in the log to copy.")
 	activityInner := container.NewBorder(nil, container.NewPadded(clearActivityBtn), nil, nil, container.NewPadded(logPane))
@@ -1037,10 +1114,7 @@ func RunWith(opts Options) error {
 	appendLog("rclone: " + eng.Rclone.ResolvedPath())
 
 	localUnset := func() bool {
-		id := gameSelect.Selected
-		if id == "" {
-			id = "ds3"
-		}
+		id := selectedGameID()
 		if cfg.GameOverrides != nil && strings.TrimSpace(cfg.GameOverrides[id]) != "" {
 			return false
 		}
@@ -1048,6 +1122,28 @@ func RunWith(opts Options) error {
 	}
 
 	a.Lifecycle().SetOnStarted(func() {
+		if os.Getenv("SC_UI_STRESS") == "1" || os.Getenv("SC_UI_STRESS") == "true" {
+			go func() {
+				time.Sleep(600 * time.Millisecond)
+				fyne.Do(func() {
+					t0 := time.Now()
+					for i := 0; i < 80; i++ {
+						appendLog(fmt.Sprintf("stress line %d", i))
+					}
+					uiTraceSince("stress.enqueue_80_logs", time.Since(t0))
+					labels := detect.SelectLabels()
+					for _, label := range labels {
+						tGame := time.Now()
+						gameSelect.SetSelected(label)
+						uiTrace("stress.gameSelect", tGame)
+					}
+					gameSelect.SetSelected(detect.SelectLabelForID("ds3"))
+				})
+				time.Sleep(activityLogFlushEvery + 500*time.Millisecond)
+				uiTraceSince("stress.done", 0)
+				fyne.Do(func() { a.Quit() })
+			}()
+		}
 		go func() {
 			time.Sleep(250 * time.Millisecond)
 			fyne.Do(func() {
@@ -1087,10 +1183,10 @@ func RunWith(opts Options) error {
 			fyne.Do(func() {
 				pendingUpdate = info
 				banner := buildUpdateBanner(info.Version, runInstallUpdate, func() {
-					updateBanner.dismissAnimated(refreshRoot)
+					updateBanner.dismissAnimated(refreshRootLayout, refreshRootFull)
 				})
 				updateBanner.showBanner(banner)
-				refreshRoot()
+				refreshRootFull()
 				appendLog("update available: " + info.Tag)
 			})
 		}()
@@ -1185,6 +1281,44 @@ func maxFloat32(vals ...float32) float32 {
 		}
 	}
 	return m
+}
+
+// maxWidthCenter caps obj to maxW and centers it in the allocated space.
+func maxWidthCenter(maxW float32, obj fyne.CanvasObject) fyne.CanvasObject {
+	return container.New(&maxWidthCenterLayout{maxWidth: maxW}, obj)
+}
+
+type maxWidthCenterLayout struct {
+	maxWidth float32
+}
+
+func (m *maxWidthCenterLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	if len(objects) == 0 {
+		return fyne.NewSize(0, 0)
+	}
+	return objects[0].MinSize()
+}
+
+func (m *maxWidthCenterLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+	obj := objects[0]
+	min := obj.MinSize()
+	w := size.Width
+	if w > m.maxWidth {
+		w = m.maxWidth
+	}
+	if w < min.Width {
+		w = min.Width
+	}
+	h := min.Height
+	x := (size.Width - w) / 2
+	if x < 0 {
+		x = 0
+	}
+	obj.Move(fyne.NewPos(x, 0))
+	obj.Resize(fyne.NewSize(w, h))
 }
 
 // fixedWidth wraps obj so MinSize width is at least w (keeps columns aligned across rows).

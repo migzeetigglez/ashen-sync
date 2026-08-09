@@ -20,18 +20,15 @@ var baskervilleRegularTTF []byte
 //go:embed fonts/LibreBaskerville-Bold.ttf
 var baskervilleBoldTTF []byte
 
-func fontCinzelRegular() fyne.Resource {
-	return fyne.NewStaticResource("Cinzel-Regular.ttf", cinzelRegularTTF)
-}
+// Cached once — theme.Font() is called constantly during measure/paint.
+var (
+	resCinzelRegular      = fyne.NewStaticResource("Cinzel-Regular.ttf", cinzelRegularTTF)
+	resCinzelBold         = fyne.NewStaticResource("Cinzel-Bold.ttf", cinzelBoldTTF)
+	resBaskervilleRegular = fyne.NewStaticResource("LibreBaskerville-Regular.ttf", baskervilleRegularTTF)
+	resBaskervilleBold    = fyne.NewStaticResource("LibreBaskerville-Bold.ttf", baskervilleBoldTTF)
+)
 
-func fontCinzelBold() fyne.Resource {
-	return fyne.NewStaticResource("Cinzel-Bold.ttf", cinzelBoldTTF)
-}
-
-func fontBaskervilleRegular() fyne.Resource {
-	return fyne.NewStaticResource("LibreBaskerville-Regular.ttf", baskervilleRegularTTF)
-}
-
-func fontBaskervilleBold() fyne.Resource {
-	return fyne.NewStaticResource("LibreBaskerville-Bold.ttf", baskervilleBoldTTF)
-}
+func fontCinzelRegular() fyne.Resource      { return resCinzelRegular }
+func fontCinzelBold() fyne.Resource         { return resCinzelBold }
+func fontBaskervilleRegular() fyne.Resource { return resBaskervilleRegular }
+func fontBaskervilleBold() fyne.Resource    { return resBaskervilleBold }

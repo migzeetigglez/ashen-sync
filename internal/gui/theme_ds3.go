@@ -98,17 +98,10 @@ func (t ds3Theme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color 
 }
 
 func (t ds3Theme) Font(s fyne.TextStyle) fyne.Resource {
-	if s.Monospace {
-		return t.base.Font(s)
-	}
-	if s.Bold || s.Symbol {
-		// Display / headings — Cinzel.
-		return fontCinzelBold()
-	}
-	if s.Italic {
-		return fontBaskervilleRegular()
-	}
-	return fontBaskervilleRegular()
+	// Always use the toolkit default fonts for widgets. Custom display faces
+	// (Cinzel) are applied only via canvas.Text.FontSource on titles/captions.
+	// Theme-wide custom TTFs make every measure/paint pass expensive.
+	return t.base.Font(s)
 }
 
 func (t ds3Theme) Icon(n fyne.ThemeIconName) fyne.Resource {

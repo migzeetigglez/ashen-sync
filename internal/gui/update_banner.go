@@ -46,7 +46,10 @@ func (h *updateBannerHost) showBanner(inner fyne.CanvasObject) {
 	h.Refresh()
 }
 
-func (h *updateBannerHost) dismissAnimated(parentRefresh func()) {
+// dismissAnimated collapses the banner. layoutTick is called each frame so the
+// parent Border can pick up MinSize changes; prefer a light refresh there.
+// done is called once when the animation finishes (safe for a fuller layout pass).
+func (h *updateBannerHost) dismissAnimated(layoutTick, done func()) {
 	if !h.visible || h.animating {
 		return
 	}
@@ -58,25 +61,31 @@ func (h *updateBannerHost) dismissAnimated(parentRefresh func()) {
 	if start < 1 {
 		start = 44
 	}
+	animStart := time.Now()
 	anim := fyne.NewAnimation(280*time.Millisecond, func(f float32) {
 		fyne.Do(func() {
+			t0 := time.Now()
 			h.height = start * (1 - f)
 			if h.height < 0 {
 				h.height = 0
 			}
 			h.Refresh()
-			if parentRefresh != nil {
-				parentRefresh()
+			if layoutTick != nil {
+				layoutTick()
 			}
+			uiTrace("banner.frame", t0)
 			if f >= 1 {
 				h.visible = false
 				h.animating = false
 				h.inner = nil
 				h.Hide()
 				h.Refresh()
-				if parentRefresh != nil {
-					parentRefresh()
+				if done != nil {
+					done()
+				} else if layoutTick != nil {
+					layoutTick()
 				}
+				uiTrace("banner.dismiss_total", animStart)
 			}
 		})
 	})

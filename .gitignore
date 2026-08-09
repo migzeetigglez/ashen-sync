@@ -8,3 +8,5 @@
 /save-channeler
 /save-channeler-*
 assets/refs/
+assets/brand-playground/
+.venv-brand/
