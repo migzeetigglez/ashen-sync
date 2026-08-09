@@ -42,6 +42,8 @@ func Run() error {
 	applyStartupScale(cfg.UIScaleOrDefault())
 
 	a := app.NewWithID("com.savechanneler.app")
+	scTheme := newDS3Theme()
+	a.Settings().SetTheme(scTheme)
 	icon := appIcon()
 	a.SetIcon(icon)
 	w := a.NewWindow("Save Channeler")
@@ -55,17 +57,12 @@ func Run() error {
 		return err
 	}
 
-	baseTheme := a.Settings().Theme()
-	if baseTheme == nil {
-		baseTheme = theme.DefaultTheme()
-	}
-
 	logRich := widget.NewRichText()
 	logRich.Wrapping = fyne.TextWrapBreak
 	logScroll := container.NewVScroll(logRich)
 	// Don't let long lines dictate window/split MinSize — fill allocated space only.
-	// Neon green activity log (Validate Saves uses a brighter lime).
-	logThemed := container.NewThemeOverride(logScroll, neonLogTheme{base: baseTheme})
+	// Parchment / ember activity log (Validate Saves uses ember gold).
+	logThemed := container.NewThemeOverride(logScroll, activityLogTheme{base: scTheme})
 	logPane := container.New(&shrinkFillLayout{}, logThemed)
 
 	const (
@@ -111,26 +108,28 @@ func Run() error {
 	statusLabel.Wrapping = fyne.TextWrapWord
 
 	// --- Left column ---
-	title := widget.NewLabelWithStyle("Save Channeler", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
-	purpose := widget.NewLabelWithStyle(
-		"Sync Dark Souls II & III saves across your PCs with rclone.",
-		fyne.TextAlignCenter,
-		fyne.TextStyle{},
-	)
+	title := canvas.NewText("SAVE CHANNELER", ds3Gold)
+	title.TextStyle = fyne.TextStyle{Bold: true}
+	title.FontSource = fontCinzelBold()
+	title.TextSize = 28
+	title.Alignment = fyne.TextAlignCenter
+	purpose := widget.NewLabel("Sync Dark Souls II & III saves across your PCs with rclone.")
+	purpose.Alignment = fyne.TextAlignCenter
 	purpose.Wrapping = fyne.TextWrapWord
+	purpose.Importance = widget.LowImportance
 
 	// Uniform path rows: Label | outlined field | action button
 	remotePathEntry := widget.NewEntry()
 	remotePathEntry.SetPlaceHolder("Select remote save folder…")
 	remotePathEntry.Disable()
-	remotePathView := container.NewThemeOverride(remotePathEntry, contrastLogTheme{base: baseTheme})
+	remotePathView := container.NewThemeOverride(remotePathEntry, readableDisabledTheme{base: scTheme})
 	remoteBtn := ttwidget.NewButton("Set", nil)
 	remoteBtn.SetToolTip("Link Google Drive as the cloud sync destination, or change / disconnect the linked account. The path below updates per selected game.")
 
 	localPathEntry := widget.NewEntry()
 	localPathEntry.SetPlaceHolder("Select local save folder…")
 	localPathEntry.Disable()
-	localPathView := container.NewThemeOverride(localPathEntry, contrastLogTheme{base: baseTheme})
+	localPathView := container.NewThemeOverride(localPathEntry, readableDisabledTheme{base: scTheme})
 	localBtn := ttwidget.NewButton("Browse", nil)
 	localBtn.SetToolTip("Choose the local save folder for the selected game.")
 
@@ -266,11 +265,7 @@ func Run() error {
 	validateSavesBtn := ttwidget.NewButton("Validate Saves", nil)
 	validateSavesBtn.Importance = widget.HighImportance
 	validateSavesBtn.SetToolTip("Re-check whether the local and cloud saves match for the selected game.")
-	pillTheme := pillButtonTheme{base: baseTheme}
-	pillRow := container.NewGridWithColumns(2,
-		container.NewThemeOverride(autoDetectBtn, pillTheme),
-		container.NewThemeOverride(validateSavesBtn, pillTheme),
-	)
+	pillRow := container.NewGridWithColumns(2, autoDetectBtn, validateSavesBtn)
 
 	// runAutoDetect finds/validates a save folder. quietSkip hides the "already set" dialog (first-run).
 	runAutoDetect := func(quietSkip bool) {
@@ -346,17 +341,25 @@ func Run() error {
 
 	iconImg := canvas.NewImageFromResource(icon)
 	iconImg.FillMode = canvas.ImageFillContain
-	iconImg.SetMinSize(fyne.NewSize(220, 220))
+	iconImg.SetMinSize(fyne.NewSize(160, 160))
 
 	autoDetectGap := canvas.NewRectangle(color.Transparent)
-	autoDetectGap.SetMinSize(fyne.NewSize(1, 15))
+	autoDetectGap.SetMinSize(fyne.NewSize(1, 12))
 
-	modsHeading := widget.NewLabelWithStyle("Mods", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	modsHeading := canvas.NewText("MODS", ds3Gold)
+	modsHeading.TextStyle = fyne.TextStyle{Bold: true}
+	modsHeading.FontSource = fontCinzelBold()
+	modsHeading.TextSize = 12
+	modsHeading.Alignment = fyne.TextAlignLeading
+	setModsHeading := func(s string) {
+		modsHeading.Text = s
+		modsHeading.Refresh()
+	}
 	modsEmpty := widget.NewLabel("No mod log in this save folder.")
 	modsEmpty.Wrapping = fyne.TextWrapWord
 	modsListBox := container.NewVBox()
 	modsBody := container.NewVBox(modsEmpty, modsListBox)
-	modsSection := container.NewVBox(modsHeading, modsBody)
+	modsSection := container.NewVBox(modsHeading, goldHairline(), modsBody)
 
 	refreshModsUI := func() {
 		modsListBox.Refresh()
@@ -368,14 +371,14 @@ func Run() error {
 		modsListBox.Objects = nil
 		g, ok := detect.ByID(gameID)
 		if !ok {
-			modsHeading.SetText("Mods")
+			setModsHeading("MODS")
 			modsEmpty.SetText("Mods are only tracked for DS2, DS2 SotFS, and DS3.")
 			modsEmpty.Show()
 			refreshModsUI()
 			return
 		}
 		label := shortGameLabel(g.ID)
-		modsHeading.SetText("Mods (" + label + ")")
+		setModsHeading("MODS (" + label + ")")
 
 		var logEntries []mods.Entry
 		if saveDir != "" && saveDirLooksLikeGame(saveDir, g) {
@@ -420,22 +423,23 @@ func Run() error {
 
 	leftContent := container.NewVBox(
 		scaleRow,
-		widget.NewSeparator(),
-		title,
+		goldHairline(),
+		container.NewCenter(title),
 		purpose,
 		container.NewCenter(iconImg),
-		widget.NewSeparator(),
+		goldHairline(),
 		gameRow,
 		remoteRow,
 		localRow,
 		autoDetectGap,
 		pillRow,
-		widget.NewSeparator(),
+		goldHairline(),
 		modsSection,
 	)
-	// Entire left column scrolls (no nested scroller inside Mods).
+	// Entire left column scrolls vertically (no nested scroller inside Mods).
 	leftScroll := container.NewVScroll(leftContent)
-	left := container.New(&shrinkFillLayout{}, leftScroll)
+	leftInner := container.New(&shrinkFillLayout{}, leftScroll)
+	left := container.New(&shrinkFillLayout{}, framedPanel("", leftInner))
 
 	var refreshStatus func()
 
@@ -595,10 +599,13 @@ func Run() error {
 	}
 
 	pullBtn := ttwidget.NewButton("Pull", func() { runAction("pull", eng.Pull) })
+	pullBtn.Importance = widget.HighImportance
 	pullBtn.SetToolTip("Download this game’s cloud save onto this PC.")
 	pushBtn := ttwidget.NewButton("Push", func() { runAction("push", eng.Push) })
+	pushBtn.Importance = widget.HighImportance
 	pushBtn.SetToolTip("Upload this PC’s save for this game to the cloud.")
 	watchBtn := ttwidget.NewButton("Start Watcher", nil)
+	watchBtn.Importance = widget.HighImportance
 	watchBtn.SetToolTip("Background auto-sync: push after local saves settle (and only when the game isn’t running), and pull from the cloud on an interval.")
 	watchBtn.OnTapped = func() {
 		if !remoteConfigured(cfg) {
@@ -618,6 +625,9 @@ func Run() error {
 		watchBtn.SetText("Stop Watcher")
 		appendLog("watcher started")
 	}
+	playBtn := ttwidget.NewButton("Play", func() { runAction("play", eng.Play) })
+	playBtn.Importance = widget.HighImportance
+	playBtn.SetToolTip("Pull cloud save, launch the game via Steam, then push when the game exits.")
 
 	applyConfig = func(newCfg config.Config) {
 		cfg = newCfg
@@ -723,7 +733,10 @@ func Run() error {
 		linkRemote()
 	}
 
-	actions := container.NewVBox(pullBtn, pushBtn, watchBtn)
+	actions := container.NewGridWithColumns(2,
+		pullBtn, pushBtn,
+		watchBtn, playBtn,
+	)
 	clearActivityBtn := ttwidget.NewButton("Clear Activity", func() {
 		mu.Lock()
 		defer mu.Unlock()
@@ -731,24 +744,29 @@ func Run() error {
 		logRich.Refresh()
 	})
 	clearActivityBtn.SetToolTip("Clear the activity log.")
+	activityInner := container.NewBorder(nil, container.NewPadded(clearActivityBtn), nil, nil, container.NewPadded(logPane))
+	activityFrame := framedPanel("ACTIVITY", activityInner)
 	rightTop := container.NewVBox(
 		statusLabel,
-		widget.NewSeparator(),
+		goldHairline(),
 		actions,
+		goldHairline(),
 	)
-	rightBottom := container.NewPadded(clearActivityBtn)
-	rightInner := container.NewBorder(rightTop, rightBottom, nil, nil, container.NewPadded(logPane))
-	right := container.New(&shrinkFillLayout{}, rightInner)
+	rightInner := container.NewBorder(rightTop, nil, nil, nil, activityFrame)
+	right := container.New(&shrinkFillLayout{}, framedPanel("", rightInner))
 
 	split := container.NewHSplit(
 		container.NewPadded(left),
 		container.NewPadded(right),
 	)
-	split.SetOffset(0.40)
+	split.SetOffset(0.50) // equal columns by default
+
+	bg := canvas.NewRectangle(ds3Bg)
+	root := container.NewStack(bg, container.NewPadded(split))
 
 	refreshLeftRemote()
 	refreshLeftLocal()
-	w.SetContent(fynetooltip.AddWindowToolTipLayer(split, w.Canvas()))
+	w.SetContent(fynetooltip.AddWindowToolTipLayer(root, w.Canvas()))
 	refreshStatus()
 
 	appendLog("rclone: " + eng.Rclone.ResolvedPath())
@@ -808,7 +826,7 @@ func displayPath(s string) string {
 	return "…" + s[len(s)-(max-1):]
 }
 
-// shrinkFillLayout reports a small MinSize so parents (HSplit / window) can shrink,
+// shrinkFillLayout reports a small MinSize so parents can shrink,
 // while always giving children the full allocated size.
 type shrinkFillLayout struct{}
 
@@ -822,51 +840,6 @@ func (shrinkFillLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 		o.Move(fyne.NewPos(0, 0))
 	}
 }
-
-// contrastLogTheme paints disabled widgets with normal foreground so log text stays readable.
-type contrastLogTheme struct {
-	base fyne.Theme
-}
-
-func (t contrastLogTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
-	if n == theme.ColorNameDisabled {
-		return t.base.Color(theme.ColorNameForeground, v)
-	}
-	return t.base.Color(n, v)
-}
-
-func (t contrastLogTheme) Font(s fyne.TextStyle) fyne.Resource { return t.base.Font(s) }
-func (t contrastLogTheme) Icon(n fyne.ThemeIconName) fyne.Resource {
-	return t.base.Icon(n)
-}
-func (t contrastLogTheme) Size(n fyne.ThemeSizeName) float32 { return t.base.Size(n) }
-
-// neonLogTheme styles the activity log in neon green.
-type neonLogTheme struct {
-	base fyne.Theme
-}
-
-var (
-	neonGreen     = color.NRGBA{R: 0x39, G: 0xff, B: 0x14, A: 0xff} // #39FF14
-	neonGreenSoft = color.NRGBA{R: 0x7c, G: 0xff, B: 0x6b, A: 0xff} // validate / emphasis
-)
-
-func (t neonLogTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
-	switch n {
-	case theme.ColorNameForeground, theme.ColorNameDisabled:
-		return neonGreen
-	case theme.ColorNamePrimary:
-		return neonGreenSoft
-	default:
-		return t.base.Color(n, v)
-	}
-}
-
-func (t neonLogTheme) Font(s fyne.TextStyle) fyne.Resource { return t.base.Font(s) }
-func (t neonLogTheme) Icon(n fyne.ThemeIconName) fyne.Resource {
-	return t.base.Icon(n)
-}
-func (t neonLogTheme) Size(n fyne.ThemeSizeName) float32 { return t.base.Size(n) }
 
 func looksLikeSteamIDDir(name string) bool {
 	if len(name) < 5 {
@@ -950,23 +923,4 @@ func (f *fixedWidthLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 		h = objects[0].MinSize().Height
 	}
 	return fyne.NewSize(f.width, h)
-}
-
-// pillButtonTheme slightly rounds the auto-detect button (not a full capsule).
-type pillButtonTheme struct {
-	base fyne.Theme
-}
-
-func (t pillButtonTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
-	return t.base.Color(n, v)
-}
-func (t pillButtonTheme) Font(s fyne.TextStyle) fyne.Resource { return t.base.Font(s) }
-func (t pillButtonTheme) Icon(n fyne.ThemeIconName) fyne.Resource {
-	return t.base.Icon(n)
-}
-func (t pillButtonTheme) Size(n fyne.ThemeSizeName) float32 {
-	if n == theme.SizeNameInputRadius {
-		return 6
-	}
-	return t.base.Size(n)
 }
