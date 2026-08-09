@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Build a macOS .app so the dock uses assets/icon.icns (bare binaries show "exec").
+# Build a macOS .app (+ zip) so the dock uses assets/icon.icns.
+# Bundles a pinned rclone next to the app binary (no PATH install needed).
+# Output: dist/Save Channeler.app and dist/save-channeler-macos-<arch>.zip
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -9,25 +11,46 @@ if [[ ! -f assets/icon.icns ]]; then
   exit 1
 fi
 
-mkdir -p dist
+VER="${VERSION_TAG:-}"
+VER="${VER#v}"
+if [[ -z "$VER" ]]; then
+  VER="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+fi
+if [[ -z "$VER" ]]; then
+  VER="0.0.0-dev"
+fi
+
+HOST_ARCH="$(uname -m)"
+case "$HOST_ARCH" in
+  arm64|aarch64) ARCH_NAME=arm64 ;;
+  x86_64) ARCH_NAME=amd64 ;;
+  *) ARCH_NAME="$HOST_ARCH" ;;
+esac
+
+APP="dist/Save Channeler.app"
+ZIP="dist/save-channeler-macos-${ARCH_NAME}.zip"
 LDFLAGS="$("$ROOT/scripts/version-ldflags.sh" || true)"
 LDFLAG_ARGS=()
 if [[ -n "$LDFLAGS" ]]; then
   LDFLAG_ARGS=(-ldflags "$LDFLAGS")
   echo "Stamping version via ldflags: $LDFLAGS"
 fi
+
+mkdir -p dist
+# Remove previous bundle / zip
+rm -rf "dist/Ashen Sync.app" "$APP" "$ZIP"
+
 go build "${LDFLAG_ARGS[@]}" -o /tmp/save-channeler-bin ./cmd/save-channeler
 
-# Remove previous bundle names
-rm -rf "dist/Ashen Sync.app" "dist/Save Channeler.app"
-
-APP="dist/Save Channeler.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp /tmp/save-channeler-bin "$APP/Contents/MacOS/Save Channeler"
 chmod +x "$APP/Contents/MacOS/Save Channeler"
 cp assets/icon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+# Bundle rclone beside the executable (Contents/MacOS) so resolveRclone finds it.
+RCLONE_ARCH="$HOST_ARCH" "$ROOT/scripts/fetch-rclone.sh" macos "$APP/Contents/MacOS"
+
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -39,9 +62,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleIdentifier</key>
 	<string>com.savechanneler.app</string>
 	<key>CFBundleVersion</key>
-	<string>0.2.1</string>
+	<string>${VER}</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.1</string>
+	<string>${VER}</string>
 	<key>CFBundleExecutable</key>
 	<string>Save Channeler</string>
 	<key>CFBundleIconFile</key>
@@ -58,5 +81,10 @@ PLIST
 
 xattr -cr "$APP" 2>/dev/null || true
 codesign --force --deep --sign - "$APP" 2>/dev/null || true
+
+# Zip for GitHub Releases (preserve .app bundle layout)
+ditto -c -k --keepParent "$APP" "$ZIP"
+
 echo "Built $APP"
+echo "Archive $ZIP"
 echo "Quit any old app in the dock, then: open \"$APP\""

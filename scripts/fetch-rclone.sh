@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Download a pinned rclone binary into DEST_DIR.
-# Usage: fetch-rclone.sh <linux|windows> <dest_dir>
-# Env: RCLONE_VERSION (default 1.75.0)
+# Usage: fetch-rclone.sh <linux|windows|macos> <dest_dir>
+# Env: RCLONE_VERSION (default 1.75.0), RCLONE_ARCH (macos only: arm64|amd64|x86_64)
 set -euo pipefail
 
-OS_TARGET="${1:?usage: fetch-rclone.sh <linux|windows> <dest_dir>}"
-DEST_DIR="${2:?usage: fetch-rclone.sh <linux|windows> <dest_dir>}"
+OS_TARGET="${1:?usage: fetch-rclone.sh <linux|windows|macos> <dest_dir>}"
+DEST_DIR="${2:?usage: fetch-rclone.sh <linux|windows|macos> <dest_dir>}"
 RCLONE_VERSION="${RCLONE_VERSION:-1.75.0}"
 
 mkdir -p "$DEST_DIR"
@@ -23,8 +23,22 @@ case "$OS_TARGET" in
     BIN_SRC="rclone-v${RCLONE_VERSION}-windows-amd64/rclone.exe"
     BIN_DST="$DEST_DIR/rclone.exe"
     ;;
+  macos|darwin|osx)
+    arch="${RCLONE_ARCH:-$(uname -m)}"
+    case "$arch" in
+      arm64|aarch64) rarch=arm64 ;;
+      x86_64|amd64) rarch=amd64 ;;
+      *)
+        echo "unsupported macOS arch: $arch (want arm64 or amd64)" >&2
+        exit 2
+        ;;
+    esac
+    ARCHIVE="rclone-v${RCLONE_VERSION}-osx-${rarch}.zip"
+    BIN_SRC="rclone-v${RCLONE_VERSION}-osx-${rarch}/rclone"
+    BIN_DST="$DEST_DIR/rclone"
+    ;;
   *)
-    echo "unsupported OS target: $OS_TARGET (want linux|windows)" >&2
+    echo "unsupported OS target: $OS_TARGET (want linux|windows|macos)" >&2
     exit 2
     ;;
 esac

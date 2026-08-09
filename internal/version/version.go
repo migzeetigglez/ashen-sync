@@ -4,4 +4,4 @@ package version
 // Packaged builds override this via:
 //
 //	-ldflags "-X github.com/migzeetigglez/ashen-sync/internal/version.Version=0.2.0"
-var Version = "0.2.1"
+var Version = "0.2.2"

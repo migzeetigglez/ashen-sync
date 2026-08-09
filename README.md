@@ -2,11 +2,11 @@
 
 ![Save Channeler GUI](assets/channeler-app.png)
 
-Open-source cloud saves for **DARK SOULS II** and **DARK SOULS III** on Steam — **Windows, Linux, and Steam Deck**.
+Open-source cloud saves for **DARK SOULS II** and **DARK SOULS III** on Steam — **Windows, Linux, Steam Deck**, with a **macOS** GUI build for setup and cloud sync from a Mac.
 
 CLI binary: **`save-channeler`**.
 
-macOS is a fine place to **develop and cross-compile**, but not a runtime target: DS2/DS3 do not ship native Mac Steam builds, so save sync belongs on the machines where you actually play.
+DS2/DS3 do not ship native Mac Steam builds, so gameplay still happens on Windows/Linux/Deck; the macOS app is useful for configuring remotes and syncing saves from a Mac.
 
 FromSoftware never shipped Steam Cloud for these titles. Save Channeler fills that gap **without** embedding cloud API secrets and **without** running a sync server that sees your saves.
 
@@ -54,6 +54,14 @@ cd save-channeler-linux-amd64
 
 Open **Save Channeler** from the app menu (or `save-channeler gui`), then **Remote → Set** and choose a game.
 
+### macOS
+
+1. Download `save-channeler-macos-arm64.zip` from [Releases](https://github.com/migzeetigglez/ashen-sync/releases) (Apple Silicon).
+2. Unzip, then open `Save Channeler.app` (right-click → Open the first time if Gatekeeper prompts).
+3. In the app: **Remote → Set** → choose **Google Drive** or **Proton Drive**.
+
+`rclone` is bundled inside the app. macOS has no in-app binary replace yet — download newer zips from Releases when prompted.
+
 ### First-run setup
 
 | Step | What happens |
@@ -72,7 +80,7 @@ Packaged installs can self-update from [GitHub Releases](https://github.com/migz
 - Or run `save-channeler update` / `save-channeler update --check`.
 - After updating, a **What’s new** dialog shows the GitHub release notes.
 
-Release assets must keep stable names: `save-channeler-windows-amd64.zip` and `save-channeler-linux-amd64.tar.gz`. macOS builds only open the Releases page (no in-app replace).
+Release assets must keep stable names: `save-channeler-windows-amd64.zip`, `save-channeler-linux-amd64.tar.gz`, and `save-channeler-macos-arm64.zip`. macOS opens the Releases page for updates (no in-app replace yet).
 
 ## Build from source
 
@@ -81,7 +89,7 @@ Requirements: Go 1.22+, Steam + DS2 SotFS and/or DS3. rclone is optional if you 
 ```bash
 ./scripts/package-linux.sh      # → dist/save-channeler-linux-amd64.tar.gz (+ rclone)
 ./scripts/package-windows.sh    # → dist/save-channeler-windows-amd64.zip (+ rclone.exe)
-./scripts/package-macos.sh      # → dist/Save Channeler.app (dev machine)
+./scripts/package-macos.sh      # → dist/Save Channeler.app + save-channeler-macos-<arch>.zip
 ```
 
 Pin rclone with `RCLONE_VERSION=1.75.0` (default in scripts / CI). Tagged package builds stamp `internal/version.Version` via ldflags.
