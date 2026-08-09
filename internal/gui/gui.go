@@ -19,7 +19,6 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	fynetooltip "github.com/dweymouth/fyne-tooltip"
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
@@ -54,7 +53,7 @@ func RunWith(opts Options) error {
 	w := a.NewWindow("Save Channeler")
 	w.SetIcon(icon)
 	// Logical size; FYNE_SCALE / settings.json multiply physical pixels.
-	w.Resize(fyne.NewSize(960, 620))
+	w.Resize(fyne.NewSize(1104, 775)) // ~15% wider, ~25% taller than 960×620
 	w.SetFixedSize(false)
 
 	eng, err := syncer.New(cfg)
@@ -62,17 +61,18 @@ func RunWith(opts Options) error {
 		return err
 	}
 
-	logRich := widget.NewRichText()
-	logRich.Wrapping = fyne.TextWrapBreak
-	logScroll := container.NewVScroll(logRich)
+	// MultiLine Entry (disabled) so users can highlight and copy; RichText is not selectable in Fyne.
+	logEntry := widget.NewMultiLineEntry()
+	logEntry.Wrapping = fyne.TextWrapBreak
+	logEntry.TextStyle = fyne.TextStyle{Monospace: true}
+	logEntry.Disable()
 	// Don't let long lines dictate window/split MinSize — fill allocated space only.
-	// Parchment / ember activity log (Validate Saves uses ember gold).
-	logThemed := container.NewThemeOverride(logScroll, activityLogTheme{base: scTheme})
+	logThemed := container.NewThemeOverride(logEntry, activityLogTheme{base: scTheme})
 	logPane := container.New(&shrinkFillLayout{}, logThemed)
 
 	const (
 		logToneNormal   = iota
-		logToneValidate // Validate Saves — distinct color in the activity log
+		logToneValidate // Validate Saves — marked distinctly in the activity log
 	)
 
 	var mu sync.Mutex
@@ -80,22 +80,15 @@ func RunWith(opts Options) error {
 		fyne.Do(func() {
 			mu.Lock()
 			defer mu.Unlock()
-			colorName := theme.ColorNameForeground
-			switch tone {
-			case logToneValidate:
-				colorName = theme.ColorNamePrimary
+			prefix := ""
+			if tone == logToneValidate {
+				prefix = "◆ "
 			}
-			seg := &widget.TextSegment{
-				Text: time.Now().Format("15:04:05") + " " + line + "\n",
-				Style: widget.RichTextStyle{
-					ColorName: colorName,
-					SizeName:  theme.SizeNameText,
-					TextStyle: fyne.TextStyle{Monospace: true},
-				},
-			}
-			logRich.Segments = append(logRich.Segments, seg)
-			logRich.Refresh()
-			logScroll.ScrollToBottom()
+			logEntry.Append(time.Now().Format("15:04:05") + " " + prefix + line + "\n")
+			// Keep the newest lines in view.
+			logEntry.CursorRow = strings.Count(logEntry.Text, "\n")
+			logEntry.CursorColumn = 0
+			logEntry.Refresh()
 		})
 	}
 	appendLog := func(line string) {
@@ -1011,10 +1004,9 @@ func RunWith(opts Options) error {
 	clearActivityBtn := ttwidget.NewButton("Clear Activity", func() {
 		mu.Lock()
 		defer mu.Unlock()
-		logRich.Segments = nil
-		logRich.Refresh()
+		logEntry.SetText("")
 	})
-	clearActivityBtn.SetToolTip("Clear the activity log.")
+	clearActivityBtn.SetToolTip("Clear the activity log. Select text in the log to copy.")
 	activityInner := container.NewBorder(nil, container.NewPadded(clearActivityBtn), nil, nil, container.NewPadded(logPane))
 	activityFrame := framedPanel("ACTIVITY", activityInner)
 	rightTop := container.NewVBox(

@@ -155,7 +155,7 @@ func (t readableDisabledTheme) Icon(n fyne.ThemeIconName) fyne.Resource {
 }
 func (t readableDisabledTheme) Size(n fyne.ThemeSizeName) float32 { return t.base.Size(n) }
 
-// activityLogTheme: parchment/ember monospace log tones.
+// activityLogTheme: parchment monospace log (disabled Entry stays readable + selectable).
 type activityLogTheme struct {
 	base fyne.Theme
 }
@@ -166,6 +166,13 @@ func (t activityLogTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) colo
 		return ds3Parchment
 	case theme.ColorNamePrimary:
 		return ds3Ember
+	case theme.ColorNameInputBackground:
+		return ds3Panel
+	case theme.ColorNameInputBorder, theme.ColorNameFocus:
+		return color.NRGBA{A: 0} // no form-field chrome on the log
+	case theme.ColorNameSelection:
+		// Strong highlight so drag-select is obvious on the dark log panel.
+		return color.NRGBA{R: 0xb8, G: 0x92, B: 0x48, A: 0xcc}
 	default:
 		return t.base.Color(n, v)
 	}
