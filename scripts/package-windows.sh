@@ -12,6 +12,12 @@ ARCH="${TARGET_ARCH:-amd64}"
 STAGE="dist/save-channeler-windows-${ARCH}"
 ZIP="dist/save-channeler-windows-${ARCH}.zip"
 EXE_NAME="save-channeler.exe"
+LDFLAGS="$("$ROOT/scripts/version-ldflags.sh" || true)"
+LDFLAG_ARGS=()
+if [[ -n "$LDFLAGS" ]]; then
+  LDFLAG_ARGS=(-ldflags "$LDFLAGS")
+  echo "Stamping version via ldflags: $LDFLAGS"
+fi
 
 mkdir -p dist
 rm -rf "$STAGE" "$ZIP"
@@ -32,16 +38,16 @@ build_gui=0
 uname_s="$(uname -s 2>/dev/null || echo unknown)"
 if [[ "$uname_s" == MINGW* || "$uname_s" == MSYS* || "$uname_s" == CYGWIN* || "$uname_s" == Windows* ]]; then
   echo "Building native Windows binary (GUI if deps available)…"
-  if go build -o "$STAGE/$EXE_NAME" ./cmd/save-channeler; then
+  if go build "${LDFLAG_ARGS[@]}" -o "$STAGE/$EXE_NAME" ./cmd/save-channeler; then
     build_gui=1
     echo "GUI build OK"
   else
     echo "GUI build failed — falling back to nogui CLI"
-    go build -tags nogui -o "$STAGE/$EXE_NAME" ./cmd/save-channeler
+    go build "${LDFLAG_ARGS[@]}" -tags nogui -o "$STAGE/$EXE_NAME" ./cmd/save-channeler
   fi
 else
   echo "Cross-compiling Windows/${ARCH} CLI (-tags nogui)…"
-  GOOS=windows GOARCH="$ARCH" CGO_ENABLED=0 go build -tags nogui -o "$STAGE/$EXE_NAME" ./cmd/save-channeler
+  GOOS=windows GOARCH="$ARCH" CGO_ENABLED=0 go build "${LDFLAG_ARGS[@]}" -tags nogui -o "$STAGE/$EXE_NAME" ./cmd/save-channeler
 fi
 
 # Bundle rclone.exe beside the app

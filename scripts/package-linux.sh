@@ -11,6 +11,12 @@ ARCH="${TARGET_ARCH:-amd64}"
 STAGE="dist/save-channeler-linux-${ARCH}"
 TARBALL="dist/save-channeler-linux-${ARCH}.tar.gz"
 BIN_NAME="save-channeler"
+LDFLAGS="$("$ROOT/scripts/version-ldflags.sh" || true)"
+LDFLAG_ARGS=()
+if [[ -n "$LDFLAGS" ]]; then
+  LDFLAG_ARGS=(-ldflags "$LDFLAGS")
+  echo "Stamping version via ldflags: $LDFLAGS"
+fi
 
 mkdir -p dist
 rm -rf "$STAGE" "$TARBALL"
@@ -24,16 +30,16 @@ mkdir -p "$STAGE/bin" \
 build_gui=0
 if [[ "$(uname -s)" == "Linux" ]]; then
   echo "Building native Linux binary (GUI if deps available)…"
-  if CGO_ENABLED=1 go build -o "$STAGE/bin/$BIN_NAME" ./cmd/save-channeler; then
+  if CGO_ENABLED=1 go build "${LDFLAG_ARGS[@]}" -o "$STAGE/bin/$BIN_NAME" ./cmd/save-channeler; then
     build_gui=1
     echo "GUI build OK"
   else
     echo "GUI build failed — falling back to nogui CLI"
-    CGO_ENABLED=0 go build -tags nogui -o "$STAGE/bin/$BIN_NAME" ./cmd/save-channeler
+    CGO_ENABLED=0 go build "${LDFLAG_ARGS[@]}" -tags nogui -o "$STAGE/bin/$BIN_NAME" ./cmd/save-channeler
   fi
 else
   echo "Cross-compiling Linux/${ARCH} CLI (-tags nogui)…"
-  GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -tags nogui -o "$STAGE/bin/$BIN_NAME" ./cmd/save-channeler
+  GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build "${LDFLAG_ARGS[@]}" -tags nogui -o "$STAGE/bin/$BIN_NAME" ./cmd/save-channeler
 fi
 chmod +x "$STAGE/bin/$BIN_NAME"
 

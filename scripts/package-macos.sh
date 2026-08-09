@@ -10,7 +10,13 @@ if [[ ! -f assets/icon.icns ]]; then
 fi
 
 mkdir -p dist
-go build -o /tmp/save-channeler-bin ./cmd/save-channeler
+LDFLAGS="$("$ROOT/scripts/version-ldflags.sh" || true)"
+LDFLAG_ARGS=()
+if [[ -n "$LDFLAGS" ]]; then
+  LDFLAG_ARGS=(-ldflags "$LDFLAGS")
+  echo "Stamping version via ldflags: $LDFLAGS"
+fi
+go build "${LDFLAG_ARGS[@]}" -o /tmp/save-channeler-bin ./cmd/save-channeler
 
 # Remove previous bundle names
 rm -rf "dist/Ashen Sync.app" "dist/Save Channeler.app"

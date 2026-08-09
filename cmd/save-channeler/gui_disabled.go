@@ -4,10 +4,11 @@ package main
 
 import "fmt"
 
-func runGUI() error {
+func runGUI(whatsNewPath string) error {
+	_ = whatsNewPath
 	return fmt.Errorf("GUI was not included in this build (built with -tags nogui); use CLI commands or a full desktop build")
 }
 
 func guiUsageLine() string {
-	return ""
+	return "  save-channeler update [--check]\n"
 }

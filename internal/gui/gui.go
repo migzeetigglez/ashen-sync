@@ -28,10 +28,15 @@ import (
 	"github.com/migzeetigglez/ashen-sync/internal/detect"
 	"github.com/migzeetigglez/ashen-sync/internal/mods"
 	"github.com/migzeetigglez/ashen-sync/internal/syncer"
+	"github.com/migzeetigglez/ashen-sync/internal/update"
 	"github.com/migzeetigglez/ashen-sync/internal/watch"
 )
 
 func Run() error {
+	return RunWith(Options{})
+}
+
+func RunWith(opts Options) error {
 	cfg, err := config.Load()
 	if errors.Is(err, os.ErrNotExist) {
 		cfg = config.Default()
@@ -421,8 +426,65 @@ func Run() error {
 		cfg = updated
 	})
 
+	var pendingUpdate update.Info
+	updateBtn := ttwidget.NewButton("Update available", nil)
+	updateBtn.Importance = widget.HighImportance
+	updateBtn.Hide()
+	updateBtn.SetToolTip("A newer Save Channeler release is available.")
+	updateBtn.OnTapped = func() {
+		info := pendingUpdate
+		if !info.Available {
+			return
+		}
+		if !update.CanApplyInPlace() {
+			if info.HTMLURL != "" {
+				if u, err := url.Parse(info.HTMLURL); err == nil {
+					_ = a.OpenURL(u)
+				}
+			}
+			dialog.ShowInformation(
+				"Update available",
+				fmt.Sprintf("Version %s is available.\n\nOpen the Releases page to download (macOS uses Releases; in-app replace is for Windows/Linux).", info.Version),
+				w,
+			)
+			return
+		}
+		body := info.Body
+		if body == "" {
+			body = "(No release notes provided.)"
+		}
+		if len(body) > 1200 {
+			body = body[:1200] + "\n…"
+		}
+		msg := fmt.Sprintf("Update to %s?\n\n%s\n\nSave Channeler will download the release, replace the app, and restart.", info.Tag, body)
+		dialog.ShowConfirm("Install update?", msg, func(ok bool) {
+			if !ok {
+				return
+			}
+			updateBtn.Disable()
+			prog := dialog.NewProgressInfinite("Updating", "Downloading "+info.AssetName+"…", w)
+			prog.Show()
+			go func() {
+				err := update.Apply(context.Background(), info)
+				fyne.Do(func() {
+					prog.Hide()
+					if err != nil {
+						updateBtn.Enable()
+						dialog.ShowError(err, w)
+						appendLog("update failed: " + err.Error())
+						return
+					}
+					appendLog("update applied — restarting…")
+					// Windows helper takes over after exit; Unix Exec usually does not return.
+					a.Quit()
+				})
+			}()
+		}, w)
+	}
+	topBar := container.NewBorder(nil, nil, nil, updateBtn, scaleRow)
+
 	leftContent := container.NewVBox(
-		scaleRow,
+		topBar,
 		goldHairline(),
 		container.NewCenter(title),
 		purpose,
@@ -786,6 +848,16 @@ func Run() error {
 		go func() {
 			time.Sleep(250 * time.Millisecond)
 			fyne.Do(func() {
+				if opts.WhatsNewPath != "" {
+					if notes, err := update.ReadNotesFile(opts.WhatsNewPath); err == nil {
+						body := notes.Body
+						if body == "" {
+							body = "Save Channeler was updated successfully."
+						}
+						dialog.ShowInformation("What’s new — "+notes.Tag, body, w)
+						_ = os.Remove(opts.WhatsNewPath)
+					}
+				}
 				if !remoteConfigured(cfg) {
 					dialog.ShowInformation(
 						"Welcome to Save Channeler",
@@ -798,6 +870,21 @@ func Run() error {
 				if localUnset() {
 					runAutoDetect(true)
 				}
+			})
+		}()
+		go func() {
+			info, err := update.Check(context.Background())
+			if err != nil {
+				return
+			}
+			if !info.Available {
+				return
+			}
+			fyne.Do(func() {
+				pendingUpdate = info
+				updateBtn.SetText("Update " + info.Version)
+				updateBtn.Show()
+				appendLog("update available: " + info.Tag)
 			})
 		}()
 	})

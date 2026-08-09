@@ -15,13 +15,15 @@ import (
 	"github.com/migzeetigglez/ashen-sync/internal/detect"
 	"github.com/migzeetigglez/ashen-sync/internal/rclonex"
 	"github.com/migzeetigglez/ashen-sync/internal/syncer"
+	"github.com/migzeetigglez/ashen-sync/internal/update"
+	"github.com/migzeetigglez/ashen-sync/internal/version"
 	"github.com/migzeetigglez/ashen-sync/internal/watch"
 )
 
 func main() {
 	if len(os.Args) < 2 {
 		// Double-click / .app launch has no args — open the GUI when built with it.
-		if err := runGUI(); err != nil {
+		if err := runGUI(""); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
 			usage()
 			os.Exit(1)
@@ -36,7 +38,7 @@ func main() {
 	case "help", "-h", "--help":
 		usage()
 	case "version", "-v", "--version":
-		fmt.Println("save-channeler", syncer.ToolVersion)
+		fmt.Println("save-channeler", version.Version)
 	case "init":
 		err = cmdInit()
 	case "doctor":
@@ -53,8 +55,15 @@ func main() {
 		err = cmdPullPushPlay("play", args)
 	case "watch":
 		err = cmdWatch()
+	case "update":
+		err = cmdUpdate(args)
 	case "gui":
-		err = runGUI()
+		whatsNew, rest := parseWhatsNewFlag(args)
+		if len(rest) > 0 {
+			err = fmt.Errorf("unexpected gui arguments: %v", rest)
+			break
+		}
+		err = runGUI(whatsNew)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		usage()
@@ -64,6 +73,71 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func parseWhatsNewFlag(args []string) (path string, rest []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--whats-new" && i+1 < len(args):
+			path = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--whats-new="):
+			path = strings.TrimPrefix(a, "--whats-new=")
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return path, rest
+}
+
+func cmdUpdate(args []string) error {
+	checkOnly := false
+	for _, a := range args {
+		switch a {
+		case "--check", "-c":
+			checkOnly = true
+		case "-h", "--help":
+			fmt.Print(`Usage:
+  save-channeler update         Download and install the latest release (Windows/Linux)
+  save-channeler update --check Only check whether an update is available
+`)
+			return nil
+		default:
+			return fmt.Errorf("unknown update flag: %s", a)
+		}
+	}
+
+	ctx := context.Background()
+	info, err := update.Check(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("current: %s\nlatest:  %s\n", info.Current, info.Version)
+	if !info.Available {
+		fmt.Println("already up to date")
+		return nil
+	}
+	fmt.Printf("asset:   %s\n", info.AssetName)
+	if checkOnly {
+		fmt.Println("update available")
+		return nil
+	}
+	if !update.CanApplyInPlace() {
+		if info.HTMLURL != "" {
+			return fmt.Errorf("in-app update not supported on this OS; download from %s", info.HTMLURL)
+		}
+		return fmt.Errorf("in-app update not supported on this OS")
+	}
+	fmt.Println("downloading and applying update…")
+	if err := update.Apply(ctx, info); err != nil {
+		return err
+	}
+	// Windows: helper restarts GUI; process should exit.
+	// Linux: Apply exec's into the new binary (does not return on success).
+	fmt.Println("update helper started — exiting so files can be replaced")
+	os.Exit(0)
+	return nil
 }
 
 func usage() {

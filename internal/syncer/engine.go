@@ -13,9 +13,11 @@ import (
 	"github.com/migzeetigglez/ashen-sync/internal/manifest"
 	"github.com/migzeetigglez/ashen-sync/internal/rclonex"
 	"github.com/migzeetigglez/ashen-sync/internal/snapshot"
+	"github.com/migzeetigglez/ashen-sync/internal/version"
 )
 
-const ToolVersion = "0.1.0"
+// ToolVersion is the app version stamped into save manifests.
+var ToolVersion = version.Version
 
 type Prefer string
 

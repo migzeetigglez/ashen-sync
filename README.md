@@ -59,6 +59,15 @@ Open **Save Channeler** from the app menu (or `save-channeler gui`), then **Remo
 | Link remote (Google Drive) | Your cloud credentials — only you can authorize |
 | Confirm local save folder | Auto-detect usually finds it; Browse if it does not |
 
+### Updates (Windows / Linux)
+
+Packaged installs can self-update from [GitHub Releases](https://github.com/migzeetigglez/ashen-sync/releases):
+
+- In the GUI, an **Update** button appears when a newer release is available (click to download, replace, and restart).
+- Or run `save-channeler update` / `save-channeler update --check`.
+
+Release assets must keep stable names: `save-channeler-windows-amd64.zip` and `save-channeler-linux-amd64.tar.gz`. Write release notes in the GitHub release body — that text is shown after updating. macOS builds only open the Releases page (no in-app replace).
+
 ## Build from source
 
 Requirements: Go 1.22+, Steam + DS2 SotFS and/or DS3. rclone is optional if you package with the scripts below (they download a pinned rclone).
