@@ -64,7 +64,9 @@ func Run() error {
 	logRich.Wrapping = fyne.TextWrapBreak
 	logScroll := container.NewVScroll(logRich)
 	// Don't let long lines dictate window/split MinSize — fill allocated space only.
-	logPane := container.New(&shrinkFillLayout{}, logScroll)
+	// Neon green activity log (Validate Saves uses a brighter lime).
+	logThemed := container.NewThemeOverride(logScroll, neonLogTheme{base: baseTheme})
+	logPane := container.New(&shrinkFillLayout{}, logThemed)
 
 	const (
 		logToneNormal   = iota
@@ -354,14 +356,11 @@ func Run() error {
 	modsEmpty.Wrapping = fyne.TextWrapWord
 	modsListBox := container.NewVBox()
 	modsBody := container.NewVBox(modsEmpty, modsListBox)
-	modsScroll := container.NewVScroll(modsBody)
-	modsScroll.SetMinSize(fyne.NewSize(0, 120))
-	modsSection := container.NewBorder(modsHeading, nil, nil, nil, modsScroll)
+	modsSection := container.NewVBox(modsHeading, modsBody)
 
 	refreshModsUI := func() {
 		modsListBox.Refresh()
 		modsBody.Refresh()
-		modsScroll.Refresh()
 		modsSection.Refresh()
 	}
 
@@ -419,7 +418,7 @@ func Run() error {
 		cfg = updated
 	})
 
-	leftTop := container.NewVBox(
+	leftContent := container.NewVBox(
 		scaleRow,
 		widget.NewSeparator(),
 		title,
@@ -432,10 +431,11 @@ func Run() error {
 		autoDetectGap,
 		pillRow,
 		widget.NewSeparator(),
+		modsSection,
 	)
-	// Mods fill remaining height and scroll when the list is long.
-	leftInner := container.NewBorder(leftTop, nil, nil, nil, modsSection)
-	left := container.New(&shrinkFillLayout{}, leftInner)
+	// Entire left column scrolls (no nested scroller inside Mods).
+	leftScroll := container.NewVScroll(leftContent)
+	left := container.New(&shrinkFillLayout{}, leftScroll)
 
 	var refreshStatus func()
 
@@ -840,6 +840,33 @@ func (t contrastLogTheme) Icon(n fyne.ThemeIconName) fyne.Resource {
 	return t.base.Icon(n)
 }
 func (t contrastLogTheme) Size(n fyne.ThemeSizeName) float32 { return t.base.Size(n) }
+
+// neonLogTheme styles the activity log in neon green.
+type neonLogTheme struct {
+	base fyne.Theme
+}
+
+var (
+	neonGreen     = color.NRGBA{R: 0x39, G: 0xff, B: 0x14, A: 0xff} // #39FF14
+	neonGreenSoft = color.NRGBA{R: 0x7c, G: 0xff, B: 0x6b, A: 0xff} // validate / emphasis
+)
+
+func (t neonLogTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
+	switch n {
+	case theme.ColorNameForeground, theme.ColorNameDisabled:
+		return neonGreen
+	case theme.ColorNamePrimary:
+		return neonGreenSoft
+	default:
+		return t.base.Color(n, v)
+	}
+}
+
+func (t neonLogTheme) Font(s fyne.TextStyle) fyne.Resource { return t.base.Font(s) }
+func (t neonLogTheme) Icon(n fyne.ThemeIconName) fyne.Resource {
+	return t.base.Icon(n)
+}
+func (t neonLogTheme) Size(n fyne.ThemeSizeName) float32 { return t.base.Size(n) }
 
 func looksLikeSteamIDDir(name string) bool {
 	if len(name) < 5 {
