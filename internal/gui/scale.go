@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
@@ -65,10 +66,9 @@ func almostEqual(a, b float32) bool {
 	return d < 0.01
 }
 
-// applyStartupScale writes Fyne's user scale before the app loads settings.
-// We avoid setting FYNE_SCALE so the in-app control can update live via settings.json.
+// applyStartupScale sets Fyne's user scale before the app loads settings.
 func applyStartupScale(scale float32) {
-	_ = writeFyneScale(scale)
+	_ = applyLiveScale(scale)
 }
 
 func clampScale(scale float32) float32 {
@@ -81,8 +81,11 @@ func clampScale(scale float32) float32 {
 	return scale
 }
 
-// writeFyneScale updates ~/.config/fyne/settings.json so the running app
-// (and future launches) pick up the scale via Fyne's settings watcher.
+func scaleEnvValue(scale float32) string {
+	return strconv.FormatFloat(float64(clampScale(scale)), 'f', -1, 32)
+}
+
+// writeFyneScale updates ~/.config/fyne/settings.json for future launches.
 func writeFyneScale(scale float32) error {
 	schema := fyneapp.SettingsSchema{}
 	path := schema.StoragePath()
@@ -100,11 +103,35 @@ func writeFyneScale(scale float32) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// applyLiveScale persists Fyne settings and forces an immediate canvas rescale.
+// Fyne has no public SetScale; the glfw driver reads FYNE_SCALE on reloadScale(),
+// which is triggered by Settings change listeners (e.g. SetTheme).
+func applyLiveScale(scale float32) error {
+	scale = clampScale(scale)
+	if err := writeFyneScale(scale); err != nil {
+		return err
+	}
+	_ = os.Setenv("FYNE_SCALE", scaleEnvValue(scale))
+	if a := fyne.CurrentApp(); a != nil {
+		if th := a.Settings().Theme(); th != nil {
+			a.Settings().SetTheme(th)
+		}
+		if c := a.Driver().AllWindows(); len(c) > 0 {
+			for _, w := range c {
+				if content := w.Content(); content != nil {
+					content.Refresh()
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // newUIScaleControl builds a labeled select that persists ui_scale and applies it live.
 func newUIScaleControl(cfg *config.Config, w fyne.Window, onSaved func(config.Config)) fyne.CanvasObject {
 	sel := ttwidget.NewSelect(uiScaleLabels(), nil)
 	sel.SetSelected(labelForScale(cfg.UIScaleOrDefault()))
-	sel.SetToolTip("Make the whole UI larger or smaller. You may need to reopen Save Channeler for it to fully apply.")
+	sel.SetToolTip("Make the whole UI larger or smaller. Changes apply immediately.")
 	sel.OnChanged = func(label string) {
 		scale, ok := scaleForLabel(label)
 		if !ok {
@@ -115,18 +142,11 @@ func newUIScaleControl(cfg *config.Config, w fyne.Window, onSaved func(config.Co
 			dialog.ShowError(err, w)
 			return
 		}
-		// FYNE_SCALE overrides settings.json — clear it so the watcher can apply.
-		_ = os.Unsetenv("FYNE_SCALE")
-		if err := writeFyneScale(scale); err != nil {
+		if err := applyLiveScale(scale); err != nil {
 			dialog.ShowError(err, w)
 			return
 		}
 		onSaved(*cfg)
-		dialog.ShowInformation(
-			"UI scale updated",
-			fmt.Sprintf("Scale set to %s.\n\nIf widgets still look off, close and reopen Save Channeler.", label),
-			w,
-		)
 	}
 	return container.NewBorder(nil, nil, widget.NewLabel("UI scale"), nil, sel)
 }
