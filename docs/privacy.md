@@ -2,11 +2,11 @@
 
 **Last updated:** 2026-10-20
 
-This privacy policy applies to the **Get offa Windows** / **Save Channeler** desktop application and related Google OAuth clients used with it (the “App”), maintained at [github.com/migzeetigglez/ashen-sync](https://github.com/migzeetigglez/ashen-sync).
+This privacy policy applies to the **Get offa Windows** / **Save Channeler** desktop application and related Google OAuth clients used with it (the “App”).
 
 ## Summary
 
-The App runs on **your** device. It helps you copy files you choose (such as game saves) to cloud storage **you** control, using [rclone](https://rclone.org/). We do not operate a sync server that receives your files or Google account data.
+The App runs on **your** device. It helps you copy files you choose (such as game saves) to cloud storage **you** control, using rclone. We do not operate a sync server that receives your files or Google account data.
 
 ## Google user data
 
@@ -19,7 +19,7 @@ When you authorize Google Drive access (via the App or rclone configured with th
 ### How that data is used
 
 - Solely to provide local file sync / transfer features you initiate (list, upload, download, sync).
-- Use of Google user data is limited to these practices and complies with Google’s [Limited Use requirements](https://developers.google.com/terms/api-services-user-data-policy) for the scopes you approve.
+- Use of Google user data is limited to these practices and to the scopes you approve.
 
 ### How that data is stored
 
@@ -30,7 +30,7 @@ When you authorize Google Drive access (via the App or rclone configured with th
 
 - We do **not** sell Google user data.
 - We do **not** share Google user data with third parties for advertising, analytics, or unrelated services.
-- Data stays between your device, Google’s APIs, and (if you choose another provider) that provider—according to their policies.
+- Data stays between your device and Google’s APIs (and any other cloud provider you configure yourself).
 
 ## Other cloud providers
 
@@ -50,4 +50,4 @@ We may update this policy by changing this page. The “Last updated” date wil
 
 ## Contact
 
-Questions about this policy: open an issue on [github.com/migzeetigglez/ashen-sync](https://github.com/migzeetigglez/ashen-sync/issues) or email the support address shown on the Google OAuth consent screen for this app (`miketooantuh@gmail.com`).
+Questions about this policy: email the support address shown on the Google OAuth consent screen for this app (`miketooantuh@gmail.com`).
